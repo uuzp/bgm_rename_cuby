@@ -1,25 +1,20 @@
-from http.cookiejar import FileCookieJar
 import os
 import platform
 import shutil
-from tkinter import Tk, filedialog
-
+import gui
 
 #打开选择文件夹对话框
 #Tk().withdraw()
 
+gui
 
-if platform.system().lower() == 'windows':
-    print("windows")
-    path_xg = "\\" 
-    
-elif platform.system().lower() == 'linux':
+if platform.system().lower() != 'windows':
     print("linux")
-    path_xg = "/"
+    gui.path.xg = "/"
 
 
 #获得选择好的文件夹路径
-link_sf = filedialog.askdirectory()
+""" link_sf = filedialog.askdirectory()
 
 link_sf = str(os.path.abspath(link_sf))
 
@@ -31,13 +26,13 @@ link_of = filedialog.askdirectory()
 link_of = str(os.path.abspath(link_of))
 
 print(link_of)
-
+ """
 """ link_sf = "D:\\test"
 link_of = "D:\\视频库" """
 
 fjname = "宿命回响"
 
-link_of = link_of+path_xg+fjname
+link_of = gui.path.out_folder+gui.path.xg+fjname
 
 print(link_of)
 
@@ -46,9 +41,12 @@ if not os.path.exists(link_of):
     print("创建文件夹：",link_of)
 
 
-for item in os.scandir(link_sf):
+for item in os.scandir(gui.path.in_folder):
+    if item.is_dir():
+        print("跳过文件夹！！！")
+        continue
     s = os.path.splitext(item.name)[-1][1:]
-    o_file = link_of+path_xg+item.name
+    o_file = link_of+gui.path.xg+item.name
     video = "avi,mp4,flv,mkv"
     sub = "ass,str"
     if s in video:
