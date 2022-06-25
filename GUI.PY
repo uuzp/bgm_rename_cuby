@@ -13,6 +13,7 @@ class path():
     in_folder = "Not"
     out_folder = "Not"
     chick_quit = 0
+    xg = "\\"
 
 # 文件夹选择器
 def path_folder(in_out):
@@ -22,11 +23,11 @@ def path_folder(in_out):
 
     if in_out == 1:
         
-        path.in_folder = path_folder 
+        path.out_folder = path_folder 
         out_folder_text.config(text=path_folder)
     elif in_out == 0:
         
-        path.out_folder = path_folder
+        path.in_folder = path_folder
         in_folder_text.config(text=path_folder)        
     else:
         return
@@ -71,3 +72,4 @@ else:
 #print("work!!!")
 
 print(path.in_folder,path.out_folder)
+
