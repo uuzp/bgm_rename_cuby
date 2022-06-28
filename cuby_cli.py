@@ -34,7 +34,8 @@ bgm_name_list=bgm_name_list["list"]
 for i in range(len(bgm_name_list)):
     id = int(bgm_name_list[i]['id'])
     bgm_name_list_cn = bgm_name_list[i]['name_cn']
-    print(i," - ",bgm_name_list_cn)
+    bgm_page_url = bgm_name_list[i]['url']
+    print(i," - ",bgm_name_list_cn," - ",bgm_page_url)
 
 #选择番剧
 i = int(input("请确定番剧是否在目录中，并输入确定的序号："))
@@ -123,7 +124,7 @@ if out_file_video_list:
             os.rename(out_file_video,ep+bgm_e_name+video_file_type)
 
 
-
+# TODO 试着解决存在两种字幕文件的问题，TC.ASS,SC.ASS
 #获取字幕文件后缀名
 if out_file_sub_list:
     sub_file_type = out_file_sub_list[0]
