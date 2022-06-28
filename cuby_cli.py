@@ -100,32 +100,48 @@ bgm_e_meta = get(url,headers=headers)
 #格式化json
 bgm_e_meta = bgm_e_meta.json()
 
-#获取文件后缀名
-video_file_type = out_file_video_list[0]
-video_file_type = str(os.path.splitext(video_file_type)[1])
-sub_file_type = out_file_sub_list[0]
-sub_file_type = str(os.path.splitext(sub_file_type)[1])
-
 #获取番剧总集数和每集名称
 bgm_e_num = bgm_e_meta['total']
 bgm_e_data = bgm_e_meta['data']
 
-#重命名
-for i in range(len(out_file_video_list)):
-    out_file_video = str(out_file_video_list[i])
-    out_file_sub = str(out_file_sub_list[i])
-    bgm_e_name = str(bgm_e_data[i]['name_cn'])
-    if i < 9:
-        ep = "ep0"+str(i+1)+" - "
-        os.rename(out_file_video,ep+bgm_e_name+video_file_type)
-        os.rename(out_file_sub,ep+bgm_e_name+sub_file_type)
-    elif i >= bgm_e_num:
-        break
-    else:
-        ep = "ep"+str(i+1)+" - "
-        os.rename(out_file_video,ep+bgm_e_name+video_file_type)
-        os.rename(out_file_sub,ep+bgm_e_name+sub_file_type)
-    
+
+#获取视频文件后缀名
+if out_file_video_list:
+    video_file_type = out_file_video_list[0]
+    video_file_type = str(os.path.splitext(video_file_type)[1])
+    #视频文件重命名
+    for i in range(len(out_file_video_list)):
+        out_file_video = str(out_file_video_list[i])
+        bgm_e_name = str(bgm_e_data[i]['name_cn'])
+        if i < 9:
+            ep = "ep0"+str(i+1)+" - "
+            os.rename(out_file_video,ep+bgm_e_name+video_file_type)
+        elif i >= bgm_e_num:
+            break
+        else:
+            ep = "ep"+str(i+1)+" - "
+            os.rename(out_file_video,ep+bgm_e_name+video_file_type)
+
+
+
+#获取字幕文件后缀名
+if out_file_sub_list:
+    sub_file_type = out_file_sub_list[0]
+    sub_file_type = str(os.path.splitext(sub_file_type)[1])
+        #字幕文件重命名
+    for i in range(len(out_file_video_list)):
+        out_file_sub = str(out_file_sub_list[i])
+        bgm_e_name = str(bgm_e_data[i]['name_cn'])
+        if i < 9:
+            ep = "ep0"+str(i+1)+" - "
+            os.rename(out_file_sub,ep+bgm_e_name+sub_file_type)
+        elif i >= bgm_e_num:
+            break
+        else:
+            ep = "ep"+str(i+1)+" - "
+            os.rename(out_file_sub,ep+bgm_e_name+sub_file_type)
+
+
 print("重命名成功！")
 exit()
 
