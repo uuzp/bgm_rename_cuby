@@ -114,6 +114,33 @@ if out_file_video_list:
     for i in range(len(out_file_video_list)):
         out_file_video = str(out_file_video_list[i])
         bgm_e_name = str(bgm_e_data[i]['name_cn'])
+        if "/" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('/','／')
+        if "<" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('<','〈')
+        if ">" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('>','〉')
+        if "\\" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('\\','＼')
+        if ":" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace(':','：')
+        if "*" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('*','·')
+        if "?" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('?','？')
+        if "\"" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('\"','〃')
+        if "|" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('|','｜')
         if i < 9:
             ep = "ep0"+str(i+1)+" - "
             os.rename(out_file_video,ep+bgm_e_name+video_file_type)
@@ -133,6 +160,33 @@ if out_file_sub_list:
     for i in range(len(out_file_video_list)):
         out_file_sub = str(out_file_sub_list[i])
         bgm_e_name = str(bgm_e_data[i]['name_cn'])
+        if "/" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('/','／')
+        if "<" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('<','〈')
+        if ">" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('>','〉')
+        if "\\" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('\\','＼')
+        if ":" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace(':','：')
+        if "*" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('*','·')
+        if "?" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('?','？')
+        if "\"" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('\"','〃')
+        if "|" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('|','｜')
         if i < 9:
             ep = "ep0"+str(i+1)+" - "
             os.rename(out_file_sub,ep+bgm_e_name+sub_file_type)
