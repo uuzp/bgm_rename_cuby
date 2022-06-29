@@ -1,5 +1,6 @@
 import os
 import platform
+from re import search
 import shutil
 
 from requests import get
@@ -7,9 +8,9 @@ from requests import get
 #选择输入和输出文件夹
 in_folder = input("in_folder:")
 print("in_folder:",in_folder)
-out_folder = input("out_folder:")
-print("out_folder:",out_folder)
-
+#out_folder = input("out_folder:")
+#print("out_folder:",out_folder)
+out_folder = "D:\\视频库\\动画"
 #解决跨平台路径问题
 path_xg = "\\"
 if platform.system().lower() != 'windows':
@@ -65,8 +66,8 @@ if not os.path.exists(out_folder):
 
 #创建列表储存文件信息
 out_file_video_list = []
-out_file_sub_list = []
-
+out_file_sub_sc_list = []
+out_file_sub_tc_list = []
 #创建硬链接到番剧文件夹
 for item in os.scandir(in_folder):
     if item.is_dir():
@@ -85,7 +86,10 @@ for item in os.scandir(in_folder):
     elif s in sub:
         print("sub")
         shutil.copy(item,out_file )
-        out_file_sub_list.append(out_file)
+        if search(r"(?:sc|SC|CHS|chs)",out_file):
+            out_file_sub_sc_list.append(out_file)
+        elif search(r"(?:tc|TC|CHT|cht)",out_file):
+            out_file_sub_tc_list.append(out_file)
         print("复制字幕：",item," ==> ",out_file)
     else:
         print("no video!")
@@ -153,12 +157,12 @@ if out_file_video_list:
 
 # TODO 试着解决存在两种字幕文件的问题，TC.ASS,SC.ASS
 #获取字幕文件后缀名
-if out_file_sub_list:
-    sub_file_type = out_file_sub_list[0]
-    sub_file_type = str(os.path.splitext(sub_file_type)[1])
+if out_file_sub_sc_list:
+    sub_file_sc_type = out_file_sub_sc_list[0]
+    sub_file_type = str(os.path.splitext(sub_file_sc_type)[1])
         #字幕文件重命名
     for i in range(len(out_file_video_list)):
-        out_file_sub = str(out_file_sub_list[i])
+        out_file_sc_sub = str(out_file_sub_sc_list[i])
         bgm_e_name = str(bgm_e_data[i]['name_cn'])
         if "/" in bgm_e_name:
             print("yes")
@@ -189,15 +193,61 @@ if out_file_sub_list:
             bgm_e_name = bgm_e_name.replace('|','｜')
         if i < 9:
             ep = "ep0"+str(i+1)+" - "
-            os.rename(out_file_sub,ep+bgm_e_name+sub_file_type)
+            os.rename(out_file_sc_sub,ep+bgm_e_name+".sc"+sub_file_type)
         elif i >= bgm_e_num:
             break
         else:
             ep = "ep"+str(i+1)+" - "
-            os.rename(out_file_sub,ep+bgm_e_name+sub_file_type)
+            os.rename(out_file_sc_sub,ep+bgm_e_name+".sc"+sub_file_type)
+
+if out_file_sub_tc_list:
+    sub_file_tc_type = out_file_sub_tc_list[0]
+    sub_file_type = str(os.path.splitext(sub_file_tc_type)[1])
+        #字幕文件重命名
+    for i in range(len(out_file_video_list)):
+        out_file_tc_sub = str(out_file_sub_tc_list[i])
+        bgm_e_name = str(bgm_e_data[i]['name_cn'])
+        if "/" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('/','／')
+        if "<" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('<','〈')
+        if ">" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('>','〉')
+        if "\\" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('\\','＼')
+        if ":" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace(':','：')
+        if "*" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('*','·')
+        if "?" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('?','？')
+        if "\"" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('\"','〃')
+        if "|" in bgm_e_name:
+            print("yes")
+            bgm_e_name = bgm_e_name.replace('|','｜')
+        if i < 9:
+            ep = "ep0"+str(i+1)+" - "
+            os.rename(out_file_tc_sub,ep+bgm_e_name+".tc"+sub_file_type)
+        elif i >= bgm_e_num:
+            break
+        else:
+            ep = "ep"+str(i+1)+" - "
+            os.rename(out_file_tc_sub,ep+bgm_e_name+".tc"+sub_file_type)
 
 
 print("重命名成功！")
+#print(out_file_sub_sc_list)
+#print("===")
+#print(out_file_sub_tc_list)
 exit()
 
 
