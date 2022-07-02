@@ -32,6 +32,7 @@ bgm_name_list = get(url,headers=headers).json()
 
 #获取搜索的番剧中文名列表
 bgm_name_list=bgm_name_list["list"]
+ 
 for i in range(len(bgm_name_list)):
     id = int(bgm_name_list[i]['id'])
     bgm_name_list_cn = bgm_name_list[i]['name_cn']
@@ -106,8 +107,11 @@ bgm_e_meta = get(url,headers=headers)
 bgm_e_meta = bgm_e_meta.json()
 
 #获取番剧总集数和每集名称
-bgm_e_num = bgm_e_meta['total']
+bgm_e_num = int(bgm_e_meta['total'])
 bgm_e_data = bgm_e_meta['data']
+
+    # 设定从第几集开始获取，默认第1集
+bgm_name_list_start_num=int(input("请输入从第几集开始（默认为第1集）：") or "1")
 
 
 #获取视频文件后缀名
@@ -115,44 +119,87 @@ if out_file_video_list:
     video_file_type = out_file_video_list[0]
     video_file_type = str(os.path.splitext(video_file_type)[1])
     #视频文件重命名
-    for i in range(len(out_file_video_list)):
-        out_file_video = str(out_file_video_list[i])
-        bgm_e_name = str(bgm_e_data[i]['name_cn'])
-        if "/" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('/','／')
-        if "<" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('<','〈')
-        if ">" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('>','〉')
-        if "\\" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('\\','＼')
-        if ":" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace(':','：')
-        if "*" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('*','·')
-        if "?" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('?','？')
-        if "\"" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('\"','〃')
-        if "|" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('|','｜')
-        if i < 9:
-            ep = "ep0"+str(i+1)+" - "
-            os.rename(out_file_video,ep+bgm_e_name+video_file_type)
-        elif i >= bgm_e_num:
-            break
-        else:
-            ep = "ep"+str(i+1)+" - "
-            os.rename(out_file_video,ep+bgm_e_name+video_file_type)
+    if bgm_name_list_start_num == 1:
+
+        for i in range(len(out_file_video_list)):
+            out_file_video = str(out_file_video_list[i])
+            bgm_e_name = str(bgm_e_data[i]['name_cn'])
+            if "/" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('/','／')
+            if "<" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('<','〈')
+            if ">" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('>','〉')
+            if "\\" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\\','＼')
+            if ":" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace(':','：')
+            if "*" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('*','·')
+            if "?" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('?','？')
+            if "\"" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\"','〃')
+            if "|" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('|','｜')
+            if i < 9:
+                ep = "ep0"+str(i+1)+" - "
+                os.rename(out_file_video,ep+bgm_e_name+video_file_type)
+            elif i >= bgm_e_num:
+                break
+            else:
+                ep = "ep"+str(i+1)+" - "
+                os.rename(out_file_video,ep+bgm_e_name+video_file_type)
+    elif bgm_name_list_start_num !=1:
+
+        for i in range(len(out_file_video_list)):
+            out_file_video = str(out_file_video_list[i])
+            bgm_e_name = str(bgm_e_data[bgm_name_list_start_num-1]['name_cn'])
+            if "/" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('/','／')
+            if "<" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('<','〈')
+            if ">" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('>','〉')
+            if "\\" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\\','＼')
+            if ":" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace(':','：')
+            if "*" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('*','·')
+            if "?" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('?','？')
+            if "\"" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\"','〃')
+            if "|" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('|','｜')
+            if bgm_name_list_start_num < 10:
+                ep = "ep0"+str(bgm_name_list_start_num)+" - "
+                os.rename(out_file_video,ep+bgm_e_name+video_file_type)
+            elif bgm_name_list_start_num > bgm_e_num:
+                break
+            else:
+                ep = "ep"+str(bgm_name_list_start_num)+" - "
+                os.rename(out_file_video,ep+bgm_e_name+video_file_type)
+            bgm_name_list_start_num = bgm_name_list_start_num + 1
 
 
 # TODO 试着解决存在两种字幕文件的问题，TC.ASS,SC.ASS
@@ -161,88 +208,170 @@ if out_file_sub_sc_list:
     sub_file_sc_type = out_file_sub_sc_list[0]
     sub_file_type = str(os.path.splitext(sub_file_sc_type)[1])
         #字幕文件重命名
-    for i in range(len(out_file_video_list)):
-        out_file_sc_sub = str(out_file_sub_sc_list[i])
-        bgm_e_name = str(bgm_e_data[i]['name_cn'])
-        if "/" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('/','／')
-        if "<" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('<','〈')
-        if ">" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('>','〉')
-        if "\\" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('\\','＼')
-        if ":" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace(':','：')
-        if "*" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('*','·')
-        if "?" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('?','？')
-        if "\"" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('\"','〃')
-        if "|" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('|','｜')
-        if i < 9:
-            ep = "ep0"+str(i+1)+" - "
-            os.rename(out_file_sc_sub,ep+bgm_e_name+".sc"+sub_file_type)
-        elif i >= bgm_e_num:
-            break
-        else:
-            ep = "ep"+str(i+1)+" - "
-            os.rename(out_file_sc_sub,ep+bgm_e_name+".sc"+sub_file_type)
+    if bgm_name_list_start_num == 1:
+    
+        for i in range(len(out_file_video_list)):
+            out_file_sc_sub = str(out_file_sub_sc_list[i])
+            bgm_e_name = str(bgm_e_data[i]['name_cn'])
+            if "/" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('/','／')
+            if "<" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('<','〈')
+            if ">" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('>','〉')
+            if "\\" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\\','＼')
+            if ":" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace(':','：')
+            if "*" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('*','·')
+            if "?" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('?','？')
+            if "\"" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\"','〃')
+            if "|" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('|','｜')
+            if i < 9:
+                ep = "ep0"+str(i+1)+" - "
+                os.rename(out_file_sc_sub,ep+bgm_e_name+".sc"+sub_file_type)
+            elif i >= bgm_e_num:
+                break
+            else:
+                ep = "ep"+str(i+1)+" - "
+                os.rename(out_file_sc_sub,ep+bgm_e_name+".sc"+sub_file_type)
+    elif bgm_name_list_start_num !=1:
+
+        for i in range(len(out_file_video_list)):
+            out_file_sc_sub = str(out_file_sub_sc_list[i])
+            bgm_e_name = str(bgm_e_data[bgm_name_list_start_num-1]['name_cn'])
+            if "/" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('/','／')
+            if "<" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('<','〈')
+            if ">" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('>','〉')
+            if "\\" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\\','＼')
+            if ":" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace(':','：')
+            if "*" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('*','·')
+            if "?" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('?','？')
+            if "\"" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\"','〃')
+            if "|" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('|','｜')
+            if bgm_name_list_start_num < 10:
+                ep = "ep0"+str(bgm_name_list_start_num)+" - "
+                os.rename(out_file_sc_sub,ep+bgm_e_name+".sc"+sub_file_type)
+            elif bgm_name_list_start_num > bgm_e_num:
+                break
+            else:
+                ep = "ep"+str(bgm_name_list_start_num)+" - "
+                os.rename(out_file_sc_sub,ep+bgm_e_name+".sc"+sub_file_type)
 
 if out_file_sub_tc_list:
     sub_file_tc_type = out_file_sub_tc_list[0]
     sub_file_type = str(os.path.splitext(sub_file_tc_type)[1])
         #字幕文件重命名
-    for i in range(len(out_file_video_list)):
-        out_file_tc_sub = str(out_file_sub_tc_list[i])
-        bgm_e_name = str(bgm_e_data[i]['name_cn'])
-        if "/" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('/','／')
-        if "<" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('<','〈')
-        if ">" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('>','〉')
-        if "\\" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('\\','＼')
-        if ":" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace(':','：')
-        if "*" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('*','·')
-        if "?" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('?','？')
-        if "\"" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('\"','〃')
-        if "|" in bgm_e_name:
-            print("yes")
-            bgm_e_name = bgm_e_name.replace('|','｜')
-        if i < 9:
-            ep = "ep0"+str(i+1)+" - "
-            os.rename(out_file_tc_sub,ep+bgm_e_name+".tc"+sub_file_type)
-        elif i >= bgm_e_num:
-            break
-        else:
-            ep = "ep"+str(i+1)+" - "
-            os.rename(out_file_tc_sub,ep+bgm_e_name+".tc"+sub_file_type)
+    if bgm_name_list_start_num ==1:
 
+        for i in range(len(out_file_video_list)):
+            out_file_tc_sub = str(out_file_sub_tc_list[i])
+            bgm_e_name = str(bgm_e_data[i]['name_cn'])
+            if "/" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('/','／')
+            if "<" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('<','〈')
+            if ">" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('>','〉')
+            if "\\" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\\','＼')
+            if ":" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace(':','：')
+            if "*" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('*','·')
+            if "?" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('?','？')
+            if "\"" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\"','〃')
+            if "|" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('|','｜')
+            if i < 9:
+                ep = "ep0"+str(i+1)+" - "
+                os.rename(out_file_tc_sub,ep+bgm_e_name+".tc"+sub_file_type)
+            elif i >= bgm_e_num:
+                break
+            else:
+                ep = "ep"+str(i+1)+" - "
+                os.rename(out_file_tc_sub,ep+bgm_e_name+".tc"+sub_file_type)
+    elif bgm_name_list_start_num !=1:
+        for i in range(len(out_file_video_list)):
+            out_file_tc_sub = str(out_file_sub_tc_list[i])
+            bgm_e_name = str(bgm_e_data[bgm_name_list_start_num-1]['name_cn'])
+            if "/" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('/','／')
+            if "<" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('<','〈')
+            if ">" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('>','〉')
+            if "\\" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\\','＼')
+            if ":" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace(':','：')
+            if "*" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('*','·')
+            if "?" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('?','？')
+            if "\"" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('\"','〃')
+            if "|" in bgm_e_name:
+                print("yes")
+                bgm_e_name = bgm_e_name.replace('|','｜')
+            if bgm_name_list_start_num < 10:
+                ep = "ep0"+str(bgm_name_list_start_num)+" - "
+                os.rename(out_file_tc_sub,ep+bgm_e_name+".tc"+sub_file_type)
+            elif bgm_name_list_start_num > bgm_e_num:
+                break
+            else:
+                ep = "ep"+str(bgm_name_list_start_num)+" - "
+                os.rename(out_file_tc_sub,ep+bgm_e_name+".tc"+sub_file_type)        
 
 print("重命名成功！")
 #print(out_file_sub_sc_list)
