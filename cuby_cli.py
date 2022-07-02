@@ -1,6 +1,7 @@
 import os
 import platform
 from re import search
+import re
 import shutil
 
 from requests import get
@@ -8,9 +9,11 @@ from requests import get
 #选择输入和输出文件夹
 in_folder = input("in_folder:")
 print("in_folder:",in_folder)
+#in_folder = "C:\\Users\\pheme\\Desktop\\test"
 #out_folder = input("out_folder:")
 #print("out_folder:",out_folder)
 out_folder = "D:\\视频库\\动画"
+#out_folder = "C:\\Users\\pheme\\Desktop\\新建文件夹"
 #解决跨平台路径问题
 path_xg = "\\"
 if platform.system().lower() != 'windows':
@@ -113,6 +116,9 @@ bgm_e_data = bgm_e_meta['data']
     # 设定从第几集开始获取，默认第1集
 bgm_name_list_start_num=int(input("请输入从第几集开始（默认为第1集）：") or "1")
 
+# 对获取的集数进行排序
+for i in range(len(out_file_video_list)):
+    out_file_video_list = sorted(out_file_video_list,key= lambda n:int(re.findall(r"(?<=\[)\d+?(?=\]|v2|V2)",n)[0]))
 
 #获取视频文件后缀名
 if out_file_video_list:
