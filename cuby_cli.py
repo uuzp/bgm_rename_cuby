@@ -1,3 +1,4 @@
+from html import unescape
 import os
 import platform
 from re import search
@@ -7,8 +8,10 @@ import shutil
 from requests import get
 
 def FileName(STR):
+    print("运行？")
     for i,j in ("/／","\\＼","?？","|︱","\"＂","*＊","<＜",">＞"):
         STR=STR.replace(i,j)
+        print("改名？",STR)
     return STR
 class num:
     bgm_e_num_start = 1
@@ -31,7 +34,11 @@ class num:
             out_file = str(var2[i])
             print(out_file)
             bgm_e_name = str(bgm_e_data[bgm_e_num_start-1]['name_cn'])
-            FileName(bgm_e_name)
+            print("###=>",bgm_e_name)
+            bgm_e_name = unescape(bgm_e_name)
+            print("####=>",bgm_e_name)
+            bgm_e_name = FileName(bgm_e_name)
+            print("#####=>",bgm_e_name)
             if len(str(bgm_e_num_max)) == 1:
                 ep = "ep0"+str(bgm_e_num_start)+" - "
             elif len(str(bgm_e_num_max)) == 2:
