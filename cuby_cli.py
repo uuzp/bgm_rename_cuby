@@ -16,6 +16,11 @@ class num:
     def bgm_file_rename(var1,var2):
         var1 = var2[0]
         var1 = str(os.path.splitext(var1)[1])
+        # 对获取的集数进行排序
+        if re.search(r"(?<=\[)\d+?(?=\]|v2|V2)",str(var2)):
+            print("正常！")
+            var2 = sorted(var2,key= lambda j:int(re.findall(r"(?<=\[)\d+?(?=\]|v2|V2)",j)[0]))
+
       # print(var1,var2)
         bgm_e_num_start = num.bgm_e_num_start
         for i in range(len(out_file_video_list)):
@@ -158,37 +163,21 @@ bgm_e_data = bgm_e_meta['data']
     # 设定从第几集开始获取，默认第1集
 num.bgm_e_num_start = int(input("请输入从第几集开始（默认为第1集）：") or "1")
 print("开始的数字：",num.bgm_e_num_start)
-# 对获取的集数进行排序
-
-
-
 
 #视频文件重命名
 if out_file_video_list:
-    if re.search(r"(?<=\[)\d+?(?=\]|v2|V2)",str(out_file_video_list)):
-        print("正常！")
-        out_file_video_list = sorted(out_file_video_list,key= lambda j:int(re.findall(r"(?<=\[)\d+?(?=\]|v2|V2)",j)[0]))
     num.bgm_file_rename("video_file_type",out_file_video_list)
-# TODO 简化一下排序过程
+
 #字幕文件重命名
 if out_file_sub_list:
-    if re.search(r"(?<=\[)\d+?(?=\]|v2|V2)",str(out_file_sub_list)):
-        print("正常！")
-        out_file_sub_list = sorted(out_file_sub_list,key= lambda j:int(re.findall(r"(?<=\[)\d+?(?=\]|v2|V2)",j)[0]))
     num.bgm_file_rename("sub_file_type",out_file_sub_list)
 
 #sc字幕文件重命名
 if out_file_sub_sc_list:
-    if re.search(r"(?<=\[)\d+?(?=\]|v2|V2)",str(out_file_sub_sc_list)):
-        print("正常！")
-        out_file_sub_sc_list = sorted(out_file_sub_sc_list,key= lambda j:int(re.findall(r"(?<=\[)\d+?(?=\]|v2|V2)",j)[0]))
     num.bgm_file_rename("sub_file_type",out_file_sub_sc_list)
 
 #tc字幕文件重命名
 if out_file_sub_tc_list:
-    if re.search(r"(?<=\[)\d+?(?=\]|v2|V2)",str(out_file_sub_tc_list)):
-        print("正常！")
-        out_file_sub_tc_list = sorted(out_file_sub_tc_list,key= lambda j:int(re.findall(r"(?<=\[)\d+?(?=\]|v2|V2)",j)[0]))
     num.bgm_file_rename("sub_file_type",out_file_sub_tc_list)
 
 #print(out_file_sub_list,out_file_sub_sc_list,out_file_sub_tc_list)
