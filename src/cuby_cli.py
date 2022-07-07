@@ -67,7 +67,7 @@ if platform.system().lower() != 'windows':
     print("linux")
     path_xg = "/"
 
-# 更改工作目录为选择文件夹的父路径
+# 更改工作目录
 in_folder = path.abspath(in_folder)
 chdir(in_folder)
 
