@@ -98,8 +98,7 @@ bgm_id = str(bgm_name_list[i]['id'])
 
 # 获取番剧元数据
 url = "https://api.bgm.tv/v0/subjects/"+bgm_id
-bgm_meta = get(url, headers=headers)
-bgm_meta = bgm_meta.json()
+bgm_meta = get(url, headers=headers).json()
 # 确定番剧上映年份
 bgm_year = bgm_meta['date'][0:4]
 
@@ -151,10 +150,8 @@ chdir(out_folder)
 url = "https://api.bgm.tv/v0/episodes?subject_id=" + \
     bgm_id+"&type=0&limit=100&offset=0"
 
-bgm_e_meta = get(url, headers=headers)
+bgm_e_meta = get(url, headers=headers).json()
 
-# 格式化json
-bgm_e_meta = bgm_e_meta.json()
 
 # 获取番剧总集数和每集名称
 bgm_e_num_max = int(bgm_e_meta['total'])
