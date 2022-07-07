@@ -46,3 +46,7 @@ pip install requests
 
 - [ ] GUI界面
 - [ ] rust重构
+
+# License
+
+Licensed under the [MIT](LICENSE) license.
