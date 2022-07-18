@@ -19,11 +19,11 @@ out_folder: 媒体库所在文件夹路径
 ```
 ├─out_folder    
 |   ├─{番剧名 （年份）}  
+|       ├─ep01 - title.mp4(avi,flv,mkv)     
+|       ├─ep01 - title.sc.ass(str)
+|       ├─ep01 - title.tc.ass(str) 
+|       ├─ep01 - title.ass(str)
 |   ├─...  
-|   ├─ep01 - title.mp4(avi,flv,mkv)     
-|   ├─ep01 - title.sc.ass(str)
-|   ├─ep01 - title.tc.ass(str) 
-|   ├─ep01 - title.ass(str)
 |   ├─...
 ```
 
