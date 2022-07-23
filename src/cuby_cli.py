@@ -80,20 +80,26 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'}
 bgm_name_list = get(url, headers=headers).json()
 
-# 获取搜索的番剧中文名列表
+# 获取搜索的番剧名列表,若无中文名，用原名替代
 bgm_name_list = bgm_name_list["list"]
 
+bgm_name_list_new = []
 for i in range(len(bgm_name_list)):
     id = int(bgm_name_list[i]['id'])
-    bgm_name_list_cn = bgm_name_list[i]['name_cn']
+    
+    bgm_name_title = bgm_name_list[i]['name_cn']
+    if bgm_name_title == "":
+        bgm_name_title = bgm_name_list[i]['name']
+    bgm_name_list_new.append(bgm_name_title)
     bgm_page_url = bgm_name_list[i]['url']
-    print(i, " - ", bgm_name_list_cn, " - ", bgm_page_url)
+    print(i, " - ", bgm_name_title, " - ", bgm_page_url)
+
 
 # 选择番剧
 i = int(input("请确定番剧是否在目录中，并输入确定的序号："))
 
 # 确定番剧名和ID
-bgm_name = str(bgm_name_list[i]['name_cn'])
+bgm_name = str(bgm_name_list_new[i]['name_cn'])
 bgm_id = str(bgm_name_list[i]['id'])
 
 # 获取番剧元数据
