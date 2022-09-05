@@ -66,7 +66,7 @@ impl Ep {
     pub fn new() -> Self{
         Self { name: Vec::new(), year: 1970 }
     } 
-    pub fn get(id:String) -> Self{
+    fn get(id:String) -> Self{
         let client = reqwest::blocking::Client::new();
         let url = format!(
             "https://api.bgm.tv/v0/episodes?subject_id={}&type=0&limit=100&offset=0",
@@ -322,29 +322,7 @@ fn filenames(dir:&PathBuf) -> Vec<PathBuf> {
     .filter(|r| r.is_file()) // Filter out non-folders
     .collect()
 }
-pub fn llllink(v_i_o:Link,len:&usize){
-    for i in 0..*len{
-        let s1 = &v_i_o.inpaths[i];
-        let s2 = &v_i_o.outpaths[i];
-        let filenames = filenames(&s1);
-        let s11:Vec<PathBuf> = filenames.iter().map(|x| {
-            let mut sss = s1.clone();
-            sss.push(x);
-            sss
-        }).collect();
-        let s22:Vec<PathBuf> = filenames.iter().map(|x| {
-            let mut sss = s2.clone();
-            sss.push(x);
-            sss
-        }).collect();
-        
-        for n in 0..s22.len(){
-            println!("序号：{}\n输入：{:?}\n输出：{:?}",n,s11[n],s22[n]);
-            fs::hard_link(&s11[n],  &s22[n]).unwrap();
-        };
 
-    }
-}
 #[derive(Debug, Clone)]
 pub struct Files{
     pub video : Vec<PathBuf>,
