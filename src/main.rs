@@ -53,39 +53,43 @@ fn main() {
     b7.emit(s, Msg::Start);
     
 
-    // 存储数据，v1存储path-out，v2存储path-in's,v3存储bgms
-   // let v1:Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
-    let v2:Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
-    let v3:Rc<RefCell<Vec<(String,String)>>> = Rc::new(RefCell::new(Vec::new()));
-
-    // 临时数据
-    let v4:Rc<RefCell<Vec<Bgm>>> = Rc::new(RefCell::new(Vec::new()));
+    // 临时数据，堆占用内存，或许可以用数据库代替？
+    let in_paths:Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
+    let bgms:Rc<RefCell<Vec<(String,String)>>> = Rc::new(RefCell::new(Vec::new()));
+    let search_bgms:Rc<RefCell<Vec<Bgm>>> = Rc::new(RefCell::new(Vec::new()));
     
     // 消息接收
     while app.wait() {
         if let Some(msg) = r.recv(){
             match msg {
                 Msg::AddOut => {
+                    // 选择&&显示输出文件夹
                     i1.set_value(cuby::select_folder().to_str().unwrap());
 
                 }
                 Msg::AddIn => {
+                    // 选择输入文件夹
                     let p = cuby::select_folder();
                     let p = match p.to_str() {
                         None => continue,
                         Some(_) => p,
-                    }; 
+                    };
+                    // 显示输入文件夹 
                     br1.add(&p.to_str().unwrap().to_string());
-                    v2.borrow_mut().push(p);
+                    // 存储数据
+                    in_paths.borrow_mut().push(p);
 
                 }
                 Msg::RemoveOut => {
+                    // 删除选择的行
                     let line = br1.value();
                     br1.remove(line);
-                    v2.borrow_mut().remove((line as usize)-1);
+                    // 删除数据
+                    in_paths.borrow_mut().remove((line as usize)-1);
 
                 }
                 Msg::Set => {
+                    // 错误处理，防止选择番剧为空。
                     match br2.value() > 0 {
                         true => (),
                         false => {
@@ -93,40 +97,48 @@ fn main() {
                             continue;
                         }
                     }
-                    let n = (br2.value() as usize)-1;
-                    let m = (v4.borrow()[0].id[n].clone(),v4.borrow()[0].name[n].clone());
-                    v3.borrow_mut().push(m.clone());
-                    let eq = v3.borrow().len() > v2.borrow().len();
-                    match eq  {
+                    
+                    // 将选择的番剧名和id存储到bgms
+                    let u = (br2.value() as usize)-1;
+                    let s = (search_bgms.borrow()[0].id[u].clone(),search_bgms.borrow()[0].name[u].clone());
+                    bgms.borrow_mut().push(s.clone());
+                    // 错误处理，判断对应的输入文件夹是否存在。
+                    let b = bgms.borrow().len() > in_paths.borrow().len();// 因为引用规则限制，必须使用中间变量。 
+                    // 若不存在，删除添加的数据，并跳出循环。
+                    match b  {
                         true => {
                             dialog::message_default("未选择番剧文件夹！");
-                            v3.borrow_mut().pop();
+                            bgms.borrow_mut().pop();
                             continue;
                         },
                         false => (),
                     };
-                    v4.borrow_mut().clear();
+                    // 先清除显示内容
+                    search_bgms.borrow_mut().clear();
                     br1.clear();
                     br2.clear();
-                    let len = v3.borrow().len();
+                    // 然后将从br2中选择的番剧名结合输入文件夹路径显示到br1列表
+                    let len = bgms.borrow().len();
                     for i in 0..len{
-                        let s = format!("{}\t => \t{}",v2.borrow()[i].to_str().unwrap(),v3.borrow()[i].1);
+                        let s = format!("{}\t => \t{}",in_paths.borrow()[i].to_str().unwrap(),bgms.borrow()[i].1);
                         br1.add(&s);
                     }
-
-                    for s in v2.borrow().iter().skip(len) {
+                    // 显示未对应番剧的输入文件夹路径
+                    for s in in_paths.borrow().iter().skip(len) {
                         br1.add(&s.to_str().unwrap());
                     }
 
                 }
                 Msg::Search => {
+                    // 获取搜索关键词
                     let keywords = i2.value();
-                    let bgm = Bgm::new().get(&keywords);
-                    
-                    v4.borrow_mut().clear();
-                    v4.borrow_mut().push(bgm.clone());
+                    // 获取搜索到的番剧名和id
+                    let bgms = Bgm::new().get(&keywords);
+                    // 存储数据，并显示。
+                    search_bgms.borrow_mut().clear();
+                    search_bgms.borrow_mut().push(bgms.clone());
                     br2.clear();
-                    for s in bgm.name {
+                    for s in bgms.name {
                         br2.add(&s)
                     }
 
@@ -145,16 +157,16 @@ fn main() {
                         false => path,
                     };
                     println!("path:\n{:?}\n",path);
-                    let v_names:Vec<String> = v3.borrow().iter().map(|x| x.1.clone() ).collect();
-                    let v_inpaths:Vec<PathBuf> = v2.borrow().iter().map(|x| x.clone()).collect();
+                    let v_names:Vec<String> = bgms.borrow().iter().map(|x| x.1.clone() ).collect();
+                    let v_inpaths:Vec<PathBuf> = in_paths.borrow().iter().map(|x| x.clone()).collect();
                     let v_outpaths = cuby::mkoutpaths(path, v_names);
                     cuby::mkdir(&v_outpaths);
                     cuby::name_extension(v_inpaths,v_outpaths);
                    
 
                     br1.clear();
-                    v2.borrow_mut().clear();
-                    v3.borrow_mut().clear();
+                    in_paths.borrow_mut().clear();
+                    bgms.borrow_mut().clear();
 
                 }
                 Msg::Start => {
@@ -167,14 +179,14 @@ fn main() {
                         },
                         false => path,
                     };
-                    let v_names= v3.borrow().clone();
+                    let v_names= bgms.borrow().clone();
                    // let v_inpaths:Vec<PathBuf> = v2.borrow().iter().map(|x| x.clone()).collect();
-                    let v_inpaths = v2.borrow().clone();
+                    let v_inpaths = in_paths.borrow().clone();
                     let (v_ep,v_outpaths) = cuby::out_ep_path(path, v_names);
                     cuby::tolink(v_inpaths , v_outpaths, v_ep);
                     br1.clear();
-                    v2.borrow_mut().clear();
-                    v3.borrow_mut().clear();
+                    in_paths.borrow_mut().clear();
+                    bgms.borrow_mut().clear();
                 }
                 
             }
