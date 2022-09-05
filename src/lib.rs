@@ -66,7 +66,7 @@ impl Ep {
     pub fn new() -> Self{
         Self { name: Vec::new(), year: 1970 }
     } 
-    fn get(id:String) -> Self{
+    fn get(id:&str) -> Self{
         let client = reqwest::blocking::Client::new();
         let url = format!(
             "https://api.bgm.tv/v0/episodes?subject_id={}&type=0&limit=100&offset=0",
@@ -133,6 +133,20 @@ pub fn select_folder() -> PathBuf{
     dialog.show();
     dialog.filename()
 }
+pub fn mkdir(outpaths:&Vec<PathBuf>) {
+    for path in outpaths {
+
+        match fs::create_dir(path) {
+            Ok(_) => (),
+            Err(e) => {
+                dialog::message_default(&e.to_string());
+                dialog::message_default("是啊");
+            }
+        }
+    }
+    
+
+}
 
 fn collect(json:&serde_json::Value,s:&str) -> Vec<String> {
     jsonpath_lib::selector(json)(&format!("$.list.*.{}",s))
@@ -164,28 +178,28 @@ pub fn set_out_path(s:&str) -> PathBuf {
 
 }
 
-pub fn mkoutpaths(path:PathBuf,v_names:Vec<String>) -> Vec<PathBuf>{
+pub fn get_out_file_paths(path:PathBuf,v_names:Vec<String>) -> Vec<PathBuf> {
 
-    let s =  v_names.iter().map(|x| {
+    v_names.iter().map(|x| {
         let x = replace2(x);
         let mut x2 =path.clone();
         x2.push(x);
         x2 
-    }).collect();
-    s
+    }).collect()
+
 }
-pub fn out_ep_path(path:PathBuf,v:Vec<(String,String)>) ->( Vec<Ep>,Vec<PathBuf>) {
+pub fn out_ep_path(p:PathBuf,v:Vec<(String,String)>) -> (Vec<Ep>,Vec<PathBuf>) {
     let ep:Vec<Ep> =  v.iter().map(|(x,_y)| {
-         Ep::get(x.clone())
+         Ep::get(&x)
      }).collect();
     let year = ep[0].year;
     let v_p:Vec<PathBuf> = v.iter().map(|(_x,y)| {
         let y = format!("{} ({})",replace2(y),year);
-        let mut p2 = path.clone();
+        let mut p2 = p.clone();
         p2.push(y);
         p2
     }).collect();
-    mkdir(&v_p);
+    
     (ep,v_p)
 }
 
@@ -197,7 +211,7 @@ pub fn out_file_names(p:&PathBuf,e:&Ep) -> Vec<PathBuf>{
     }).collect()
 }
 
-pub fn tolink(v1:Vec<PathBuf>,v2:Vec<PathBuf>,v3:Vec<Ep>) {
+pub fn link_rename(v1:Vec<PathBuf>,v2:Vec<PathBuf>,v3:Vec<Ep>) {
         //TODO 可以用结构体包一下
         let video_suf = "mp4 mkv";
         let sub_suf = "ass srt";
@@ -292,20 +306,7 @@ pub fn tolink(v1:Vec<PathBuf>,v2:Vec<PathBuf>,v3:Vec<Ep>) {
 }
 
 
-pub fn mkdir(outpaths:&Vec<PathBuf>) {
-        for path in outpaths {
 
-            match fs::create_dir(path) {
-                Ok(_) => (),
-                Err(e) => {
-                    dialog::message_default(&e.to_string());
-                    dialog::message_default("是啊");
-                }
-            }
-        }
-        
-    
-}
 
 pub fn files(s:&String) -> Vec<PathBuf> {
     let path = fs::read_dir(s).unwrap();
@@ -359,7 +360,7 @@ pub fn file_sort(v:&mut Vec<PathBuf>) ->Vec<PathBuf> {
 }
 
 
-pub fn name_extension(v1:Vec<PathBuf>,v2:Vec<PathBuf>) {
+pub fn just_link(v1:Vec<PathBuf>,v2:Vec<PathBuf>) {
     //TODO 可以用结构体包一下
     let video_suf = "mp4 mkv";
     let sub_suf = "ass srt";
@@ -560,7 +561,7 @@ mod tests {
         // println!("排序数据：{:?}",&v);
         // let files = name_extension(v);
         
-        let ep = Ep::get("299673".to_string());
+        let ep = Ep::get("299673");
         println!("{:?}\n{:?}",ep.name,ep.year);
 
     }

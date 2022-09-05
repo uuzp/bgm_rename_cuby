@@ -141,37 +141,38 @@ fn main() {
                     for s in bgms.name {
                         br2.add(&s)
                     }
-
-                    
-
                 }
                 Msg::Link => {
-                    //TODO v3是番剧名得和v1的输出路径合并，v2是输入文件夹，得读取每个文件夹里的视频和字幕文件，用for循环。然后 link v1+v2 => v3+Ep.name。
+                    // 获取输出文件夹路径
                     let path = cuby::set_out_path(&i1.value());
-                    // 错误处理，防止输出文件夹路径为空
-                    let path = match path.to_str().unwrap().is_empty() {
+                    // 错误处理，防止输出文件夹路径为空。
+                    let out_path = match path.to_str().unwrap().is_empty() {
                         true => {
                             dialog::message_default("未设置输出文件夹！");
                             continue;
                         },
                         false => path,
                     };
-                    println!("path:\n{:?}\n",path);
-                    let v_names:Vec<String> = bgms.borrow().iter().map(|x| x.1.clone() ).collect();
-                    let v_inpaths:Vec<PathBuf> = in_paths.borrow().iter().map(|x| x.clone()).collect();
-                    let v_outpaths = cuby::mkoutpaths(path, v_names);
+                    // 获取输入文件夹路径
+                    let v_inpaths:Vec<PathBuf> = in_paths.borrow().clone();
+                    // 获取番剧名，与输出文件夹路径结合，获得每个番剧的输出文件夹。
+                    let v_names:Vec<String> = bgms.borrow().clone().into_iter().map(|x| x.1).collect();
+                    let v_outpaths = cuby::get_out_file_paths(out_path, v_names);
+                    // 新建每个番剧的输出文件夹
                     cuby::mkdir(&v_outpaths);
-                    cuby::name_extension(v_inpaths,v_outpaths);
+                    // 开始硬链接视频文件和复制字幕
+                    cuby::just_link(v_inpaths,v_outpaths);
                    
-
+                    // 清理数据
                     br1.clear();
                     in_paths.borrow_mut().clear();
                     bgms.borrow_mut().clear();
 
                 }
                 Msg::Start => {
+                    // 获取输出文件夹路径
                     let path = cuby::set_out_path(&i1.value());
-                    // 错误处理，防止输出文件夹路径为空
+                    // 错误处理，防止输出文件夹路径为空。
                     let path = match path.to_str().unwrap().is_empty() {
                         true => {
                             dialog::message_default("未设置输出文件夹！");
@@ -179,20 +180,22 @@ fn main() {
                         },
                         false => path,
                     };
-                    let v_names= bgms.borrow().clone();
-                   // let v_inpaths:Vec<PathBuf> = v2.borrow().iter().map(|x| x.clone()).collect();
+                    // 获取输入文件夹路径
                     let v_inpaths = in_paths.borrow().clone();
-                    let (v_ep,v_outpaths) = cuby::out_ep_path(path, v_names);
-                    cuby::tolink(v_inpaths , v_outpaths, v_ep);
+                    // 获取番剧名和id
+                    let v_bgms= bgms.borrow().clone();
+                    // 获取每个番剧文件夹里的每个截止到集数名的路径（无后缀名）
+                    let (v_ep,v_outpaths) = cuby::out_ep_path(path, v_bgms);
+                    // 新建每个番剧的输出文件夹
+                    cuby::mkdir(&v_outpaths);
+                    // 开始硬链接、复制和重命名。
+                    cuby::link_rename(v_inpaths , v_outpaths, v_ep);
+                    // 清理数据。
                     br1.clear();
                     in_paths.borrow_mut().clear();
                     bgms.borrow_mut().clear();
                 }
-                
-            }
+           }
         }
-        
     }
-   
-    
 }
