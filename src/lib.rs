@@ -140,7 +140,6 @@ pub fn mkdir(outpaths:&Vec<PathBuf>) {
             Ok(_) => (),
             Err(e) => {
                 dialog::message_default(&e.to_string());
-                dialog::message_default("是啊");
             }
         }
     }
@@ -213,7 +212,7 @@ pub fn out_file_names(p:&PathBuf,e:&Ep) -> Vec<PathBuf>{
 
 pub fn link_rename(v1:Vec<PathBuf>,v2:Vec<PathBuf>,v3:Vec<Ep>) {
         //TODO 可以用结构体包一下
-        let video_suf = "mp4 mkv";
+        let video_suf = "mp4 mkv avi flv";
         let sub_suf = "ass srt";
         let sub_suf_sc = "sc chs gb";
         let sub_suf_tc = "tc cht big5";
