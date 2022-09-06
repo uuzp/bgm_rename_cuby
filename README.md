@@ -44,7 +44,7 @@ PS：
 
 # 界面
 
-![GUI](images\GUI.png)
+![GUI](.\images\GUI.png)
 
 ①：非常可爱的图标，十分感谢来自
 <a href="https://www.flaticon.com/free-icons/freeze" title="freeze icons">Freeze icons created by Freepik - Flaticon</a>
