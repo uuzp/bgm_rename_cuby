@@ -1,10 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{cell::RefCell, rc::Rc, path::PathBuf};
-
+use std::{cell::RefCell, env, path::PathBuf, rc::Rc};
 use fltk::{app, prelude::{WidgetExt, BrowserExt, WidgetBase, GroupExt, InputExt, WindowExt}, window::{WindowType, Window}, browser::MultiBrowser, input::Input, button::Button,dialog, image};
 use cuby::{Msg, Bgm};
-
 
 fn main() {
     // GUI
@@ -52,7 +50,8 @@ fn main() {
     b6.emit(s, Msg::Link);
     b7.emit(s, Msg::Start);
     
-
+    // 授权码
+    let access_token = env::var("BGM_RC_ACCESS_TOKEN").ok().unwrap_or("NULL".to_string());
     // 临时数据，堆占用内存，或许可以用数据库代替？
     let in_paths:Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
     let bgms:Rc<RefCell<Vec<(String,String)>>> = Rc::new(RefCell::new(Vec::new()));
@@ -185,7 +184,7 @@ fn main() {
                     // 获取番剧名和id
                     let v_bgms= bgms.borrow().clone();
                     // 获取每个番剧文件夹里的每个截止到集数名的路径（无后缀名）
-                    let (v_ep,v_outpaths) = cuby::out_ep_path(path, v_bgms);
+                    let (v_ep,v_outpaths) = cuby::out_ep_path(path, v_bgms,&access_token);
                     // 新建每个番剧的输出文件夹
                     cuby::mkdir(&v_outpaths);
                     // 开始硬链接、复制和重命名。
