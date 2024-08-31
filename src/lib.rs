@@ -1,7 +1,6 @@
 use std::{path::{PathBuf, Path}, fs, ffi::OsStr};
 
 use fltk::dialog;
-use reqwest::header::USER_AGENT;
 use anitomy::{Anitomy, ElementCategory};
 use rust_embed::{RustEmbed, EmbeddedFile};
 
@@ -66,7 +65,7 @@ impl Ep {
     pub fn new() -> Self{
         Self { name: Vec::new(), year: 1970 }
     } 
-    fn get(id:&str) -> Self{
+    fn get(id: &str, access_token: &str) -> Self {
         let client = reqwest::blocking::Client::new();
         let url = format!(
             "https://api.bgm.tv/v0/episodes?subject_id={}&type=0&limit=100&offset=0",
@@ -74,55 +73,56 @@ impl Ep {
         );
         let json: serde_json::Value = client
             .get(url)
-            .header(USER_AGENT, "bgm_rename_cuby")
-            .send().unwrap()
-            .json().unwrap();
-            let mut ep_list = Vec::new();
-            let year = jsonpath_lib::select(&json, "$.data.*.airdate").unwrap();
-            let year:i32 = year[0].as_str().unwrap()[0..4].parse().unwrap();
-            // let total = jsonpath::select(&json_body, "$.total").unwrap();
-            // let total = total[0].as_i64().unwrap();
-            // let total = total as usize;
+            .header("User-Agent", "uuzp/bgm_rename_cuby")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .send()
+            .unwrap()
+            .json()
+            .unwrap();
+        let mut ep_list = Vec::new();
+        let year = jsonpath_lib::select(&json, "$.data.*.airdate").unwrap();
+        let year: i32 = year[0].as_str().unwrap()[0..4].parse().unwrap();
+        // let total = jsonpath::select(&json_body, "$.total").unwrap();
+        // let total = total[0].as_i64().unwrap();
+        // let total = total as usize;
     
-            let mut epn = Vec::new();
-            for s in jsonpath_lib::selector(&json)("$.data.*.sort").unwrap() {
-                epn.push(s.as_i64().unwrap());
-            }
-            for s in jsonpath_lib::selector(&json)("$.data.*.name_cn").unwrap() {
-                let s = s.as_str().unwrap();
-                let s = s.replace("&lt;", "＜");
-                let s = s.replace("&gt;", "＞");
-                ep_list.push(s);
-            }
-            let mut name = vec![];
-            let len = epn.len();
-            let len = epn[len - 1].to_string().len();
-            
-            for i in 0..ep_list.len() {
-               let ep = match len {
-                    3  => match epn[i] > 99  {
-                        true => format!("ep{} - ",epn[i]),
-                        false => match epn[i] > 9 {
-                            true => format!("ep0{} - ",epn[i]),
-                            false => format!("ep00{} - ",epn[i]),
-                        }   
-                    }
-
-                    2 => match  epn[i] > 9 {
-                        true => format!("ep{} - ",epn[i]),
-                        false => format!("ep0{} - ",epn[i]), 
-                    }
-                    1 => format!("ep0{} - ",epn[i]),
-                    _ => "".to_string(),
-                };
-                let ep = format!("{}{}",ep,ep_list[i]);
-                name.push(ep);
-                
-            }
-
-             Ep { name, year }
-        
-    } 
+        let mut epn = Vec::new();
+        for s in jsonpath_lib::selector(&json)("$.data.*.sort").unwrap() {
+            epn.push(s.as_i64().unwrap());
+        }
+        for s in jsonpath_lib::selector(&json)("$.data.*.name_cn").unwrap() {
+            let s = s.as_str().unwrap();
+            let s = s.replace("&lt;", "＜");
+            let s = s.replace("&gt;", "＞");
+            ep_list.push(s);
+        }
+        let mut name = vec![];
+        let len = epn.len();
+        let len = epn[len - 1].to_string().len();
+    
+        for i in 0..ep_list.len() {
+            let ep = match len {
+                3 => match epn[i] > 99 {
+                    true => format!("ep{} - ", epn[i]),
+                    false => match epn[i] > 9 {
+                        true => format!("ep0{} - ", epn[i]),
+                        false => format!("ep00{} - ", epn[i]),
+                    },
+                },
+                2 => match epn[i] > 9 {
+                    true => format!("ep{} - ", epn[i]),
+                    false => format!("ep0{} - ", epn[i]),
+                },
+                1 => format!("ep0{} - ", epn[i]),
+                _ => "".to_string(),
+            };
+            let ep = format!("{}{}", ep, ep_list[i]);
+            name.push(ep);
+        }
+    
+        Ep { name, year }
+    }
+    
 
 
 }
@@ -187,9 +187,9 @@ pub fn get_out_file_paths(path:PathBuf,v_names:Vec<String>) -> Vec<PathBuf> {
     }).collect()
 
 }
-pub fn out_ep_path(p:PathBuf,v:Vec<(String,String)>) -> (Vec<Ep>,Vec<PathBuf>) {
+pub fn out_ep_path(p:PathBuf,v:Vec<(String,String)>,a:&str) -> (Vec<Ep>,Vec<PathBuf>) {
     let ep:Vec<Ep> =  v.iter().map(|(x,_y)| {
-         Ep::get(&x)
+         Ep::get(&x,a)
      }).collect();
     let year = ep[0].year;
     let v_p:Vec<PathBuf> = v.iter().map(|(_x,y)| {
@@ -528,7 +528,9 @@ pub fn get_png() -> EmbeddedFile{
 
 #[cfg(test)]
 mod tests {
-   // use std::path::PathBuf;
+   use std::env;
+
+// use std::path::PathBuf;
     
  //   use crate::get_png;
   //  use crate::file_sort;
@@ -559,8 +561,9 @@ mod tests {
         // file_sort(&mut v);
         // println!("排序数据：{:?}",&v);
         // let files = name_extension(v);
-        
-        let ep = Ep::get("299673");
+        let access_token = env::var("BGM_RC_ACCESS_TOKEN").expect("ACCESS_TOKEN must be set");
+
+        let ep = Ep::get("299673",&access_token);
         println!("{:?}\n{:?}",ep.name,ep.year);
 
     }
