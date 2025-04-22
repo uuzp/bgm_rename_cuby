@@ -92,16 +92,16 @@ impl Ep {
     pub fn new() -> Self{
         Self { name: Vec::new(), year: 1970 }
     } 
-    fn get(id: &str, access_token: &str) -> Self {
+    fn get(id: &str) -> Self { // 移除 access_token 参数
         // let client = reqwest::blocking::Client::new(); // 移除 reqwest client
         let url = format!(
             "https://api.bgm.tv/v0/episodes?subject_id={}&type=0&limit=100&offset=0",
             id
         );
-        // 使用 minreq 发送带 header 的 GET 请求
+        // 使用 minreq 发送 GET 请求
         let response = minreq::get(url)
             .with_header("User-Agent", "uuzp/bgm_rename_cuby")
-            .with_header("Authorization", format!("Bearer {}", access_token))
+            // 移除 Authorization header
             .send()
             .unwrap();
         // 获取响应文本并使用 miniserde 解析
@@ -197,7 +197,7 @@ pub fn get_out_file_paths(path:PathBuf,v_names:Vec<String>) -> Vec<PathBuf> {
 }
 pub fn out_ep_path(p:PathBuf,v:Vec<(String,String)>,a:&str) -> (Vec<Ep>,Vec<PathBuf>) {
     let ep:Vec<Ep> =  v.iter().map(|(x,_y)| {
-         Ep::get(&x,a)
+         Ep::get(&x) // 移除 a 参数
      }).collect();
     let year = ep[0].year;
     let v_p:Vec<PathBuf> = v.iter().map(|(_x,y)| {
@@ -543,7 +543,7 @@ mod tests {
     }
     #[test]
     fn test_ep() {
-        let ep = Ep::get("388190",""); // 注意：这里需要有效的 access_token 才能成功获取数据
+        let ep = Ep::get("388190"); // 移除第二个参数
         println!("{:?}",ep);
     }
     #[test]
