@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 fltk = { version = "^1.5", features = ["fltk-bundled"] }
 minreq = { version = "2.13.4", features = ["https-rustls-probe"] }
-rust-embed="8.7.0"
+rust-embed = { version = "8.7.0", features = ["include-exclude"] }
 anitomy = "0.2.0"
 rfd = "0.15.3"
 miniserde = "0.1.42"

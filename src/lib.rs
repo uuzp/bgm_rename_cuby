@@ -123,8 +123,8 @@ impl Ep {
             epn.push(episode.sort);
             let s = episode.name_cn;
             // 替换 HTML 实体
-            let s = s.replace("&lt;", "＜");
-            let s = s.replace("&gt;", "＞");
+            let s = s.replace("<", "＜");
+            let s = s.replace(">", "＞");
             ep_list.push(s);
         }
 
@@ -171,8 +171,8 @@ pub fn mkdir(outpaths:&Vec<PathBuf>) {
 pub fn replace2(s:&str) -> String {
     let s = s.replace("/", "／");
     let s = s.replace("\\", "＼");
-    let s = s.replace("&lt;", "＜");
-    let s = s.replace("&gt;", "＞");
+    let s = s.replace("<", "＜");
+    let s = s.replace(">", "＞");
     s
 }
 
@@ -345,6 +345,7 @@ impl Files {
     pub fn sort(self) -> Self {
         
         
+    
 
         Files::new()
     }
@@ -508,6 +509,8 @@ fn remove_st(v:Vec<PathBuf>,s:String) -> Vec<PathBuf> {
 
 #[derive(RustEmbed)]
 #[folder = "images/"]
+#[exclude = "GUI.png"]
+#[exclude = "ico.rc"]
 pub struct Link;
 
 impl Link {
