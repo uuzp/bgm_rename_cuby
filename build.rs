@@ -1,3 +1,3 @@
 fn main() {
-    embed_resource::compile("./images/ico.rc");
+    let _ = embed_resource::compile("./images/ico.rc",embed_resource::NONE);
 }

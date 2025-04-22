@@ -4,6 +4,35 @@ use fltk::dialog;
 use anitomy::{Anitomy, ElementCategory};
 use rust_embed::{RustEmbed, EmbeddedFile};
 
+use miniserde::{Deserialize, Serialize};
+use miniserde::json;
+use minreq; // 添加 minreq 导入
+
+#[derive(Deserialize, Serialize)]
+struct SearchResult {
+    list: Vec<Subject>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Subject {
+    id: u64,
+    name: String,
+    name_cn: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct EpisodesResult {
+    data: Vec<Episode>,
+    // total: u64, // 移除未使用的字段
+}
+
+#[derive(Deserialize, Serialize)]
+struct Episode {
+    airdate: String,
+    sort: u64,
+    name_cn: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum  Msg {
     AddIn,
@@ -33,29 +62,27 @@ impl Bgm {
             "https://api.bgm.tv/search/subject/{}?type=2&responseGroup=small",
             keywords
         );
-        let json = reqwest::blocking::get(url).unwrap().json().unwrap();
-    
-
-        // 提取番剧name和id
-
-        let id = collect(&json, &"id");
-        let name = collect(&json, &"name");
-        let name_cn = collect(&json, &"name_cn");
+        // 获取响应文本并使用 miniserde 解析
+        // 使用 minreq 发送 GET 请求并获取文本
+        let response = minreq::get(url).send().unwrap();
+        let response_text = response.as_str().unwrap();
+        let search_result: SearchResult = json::from_str(&response_text).unwrap();
 
         // 存储番剧数据到Bgm结构体
-        for i in 0..id.len() {
-            self.id.push(id[i].to_owned());
+        for subject in search_result.list {
+            self.id.push(subject.id.to_string());
             self.name.push(
-                match name_cn[i].is_empty() {
-                    true => String::from(name[i].to_owned()),
-                    false => String::from(name_cn[i].to_owned()),
-                }    
+                match subject.name_cn.is_empty() {
+                    true => subject.name,
+                    false => subject.name_cn,
+                }
             );
         }
         self
     }
 }
 
+#[derive(Debug)] // 添加 Debug trait
 pub struct Ep {
     pub name: Vec<String>,
     pub year: i32,
@@ -66,65 +93,57 @@ impl Ep {
         Self { name: Vec::new(), year: 1970 }
     } 
     fn get(id: &str, access_token: &str) -> Self {
-        let client = reqwest::blocking::Client::new();
+        // let client = reqwest::blocking::Client::new(); // 移除 reqwest client
         let url = format!(
             "https://api.bgm.tv/v0/episodes?subject_id={}&type=0&limit=100&offset=0",
             id
         );
-        let json: serde_json::Value = client
-            .get(url)
-            .header("User-Agent", "uuzp/bgm_rename_cuby")
-            .header("Authorization", format!("Bearer {}", access_token))
+        // 使用 minreq 发送带 header 的 GET 请求
+        let response = minreq::get(url)
+            .with_header("User-Agent", "uuzp/bgm_rename_cuby")
+            .with_header("Authorization", format!("Bearer {}", access_token))
             .send()
-            .unwrap()
-            .json()
             .unwrap();
+        // 获取响应文本并使用 miniserde 解析
+        let response_text = response.as_str().unwrap();
+        let episodes_result: EpisodesResult = json::from_str(&response_text).unwrap();
+
         let mut ep_list = Vec::new();
-        let year = jsonpath_lib::select(&json, "$.data.*.airdate").unwrap();
-        let year: i32 = year[0].as_str().unwrap()[0..4].parse().unwrap();
-        // let total = jsonpath::select(&json_body, "$.total").unwrap();
-        // let total = total[0].as_i64().unwrap();
-        // let total = total as usize;
-    
         let mut epn = Vec::new();
-        for s in jsonpath_lib::selector(&json)("$.data.*.sort").unwrap() {
-            epn.push(s.as_i64().unwrap());
+        let mut year = 1970; // 默认年份
+
+        // 从第一个剧集中提取年份
+        if let Some(first_episode) = episodes_result.data.first() {
+             // 安全地解析年份，如果失败则使用默认值
+             year = first_episode.airdate.get(0..4).unwrap_or("").parse().unwrap_or(1970);
         }
-        for s in jsonpath_lib::selector(&json)("$.data.*.name_cn").unwrap() {
-            let s = s.as_str().unwrap();
+
+        // 提取剧集编号和中文名称
+        for episode in episodes_result.data {
+            epn.push(episode.sort);
+            let s = episode.name_cn;
+            // 替换 HTML 实体
             let s = s.replace("&lt;", "＜");
             let s = s.replace("&gt;", "＞");
             ep_list.push(s);
         }
+
         let mut name = vec![];
-        let len = epn.len();
-        let len = epn[len - 1].to_string().len();
-    
+        // 计算最大剧集编号所需的位数，用于格式化前导零
+        let max_ep_num = epn.iter().max().cloned().unwrap_or(0);
+        // 避免 log10(0) 导致 panic
+        let num_digits = if max_ep_num == 0 { 1 } else { (max_ep_num as f64).log10() as usize + 1 };
+
+        // 格式化剧集名称
         for i in 0..ep_list.len() {
-            let ep = match len {
-                3 => match epn[i] > 99 {
-                    true => format!("ep{} - ", epn[i]),
-                    false => match epn[i] > 9 {
-                        true => format!("ep0{} - ", epn[i]),
-                        false => format!("ep00{} - ", epn[i]),
-                    },
-                },
-                2 => match epn[i] > 9 {
-                    true => format!("ep{} - ", epn[i]),
-                    false => format!("ep0{} - ", epn[i]),
-                },
-                1 => format!("ep0{} - ", epn[i]),
-                _ => "".to_string(),
-            };
-            let ep = format!("{}{}", ep, ep_list[i]);
+            // 使用计算出的位数格式化剧集编号，添加前导零
+            let ep_num_str = format!("{:0width$}", epn[i], width = num_digits);
+            let ep = format!("ep{} - {}", ep_num_str, ep_list[i]);
             name.push(ep);
         }
-    
+
         Ep { name, year }
     }
-    
-
-
 }
 
 
@@ -143,22 +162,11 @@ pub fn mkdir(outpaths:&Vec<PathBuf>) {
             }
         }
     }
-    
+
 
 }
 
-fn collect(json:&serde_json::Value,s:&str) -> Vec<String> {
-    jsonpath_lib::selector(json)(&format!("$.list.*.{}",s))
-        .unwrap()
-        .iter()
-        .map(|x| 
-            match x.as_str() {
-                Some(m) =>  m.to_string(),
-                None => x.as_i64().unwrap().to_string(),
-            }
-        )
-        .collect()
-}
+// 移除不再需要的 collect 函数
 
 pub fn replace2(s:&str) -> String {
     let s = s.replace("/", "／");
@@ -498,75 +506,89 @@ fn remove_st(v:Vec<PathBuf>,s:String) -> Vec<PathBuf> {
     sub
 }
 
-
-pub struct Link {
-    pub inpaths: Vec<PathBuf>,
-    pub outpaths: Vec<PathBuf>,
-}
-
-impl Link {
-    pub fn new() -> Self{
-        Self { inpaths: Vec::new(), outpaths: Vec::new() }
-    }
-    pub fn set(v_inpaths:Vec<PathBuf>,v_outpaths:Vec<PathBuf>) -> Self {
-        Self { inpaths: v_inpaths, outpaths: v_outpaths }
-    }
-}
-
 #[derive(RustEmbed)]
 #[folder = "images/"]
-#[include = "ice-cubes.png"]
-struct Asset;
+pub struct Link;
 
-pub fn get_png() -> EmbeddedFile{
-    let png = Asset::get("ice-cubes.png").unwrap();
-    println!("{:?}", std::str::from_utf8( png.data.as_ref()));
-   png
+impl Link {
+    pub fn get_ico() -> EmbeddedFile {
+        Link::get("ice-cubes.ico").unwrap()
+    }
 }
 
+pub fn get_png() -> EmbeddedFile{
+    Link::get("ice-cubes.png").unwrap()
+}
 
 
 #[cfg(test)]
 mod tests {
-   use std::env;
-
-// use std::path::PathBuf;
-    
- //   use crate::get_png;
-  //  use crate::file_sort;
-    use crate::Ep;
-
+    use super::*;
+    use miniserde::{Serialize, Deserialize}; // 在测试模块内部也引入 Serialize 和 Deserialize
+    use miniserde::json;
 
     #[test]
     fn it_works() {
-        // get_png();
-        // let mut f1 = PathBuf::new();
-        // f1.push("[LavaAnime & MingY] Machikado Mazoku S2 [010][1080p][CHS&JPN].mp4");
-        // let mut f2 = PathBuf::new();
-        // f2. push("[LavaAnime & MingY] Machikado Mazoku S2 [11v2][1080p][CHS&JPN] .mp4");
-        // let mut f3 = PathBuf::new();
-        // f3. push("[LavaAnime & MingY] Machikado Mazoku S2 [12][1080p][CHS&JPN] .mp4");
-        // let mut f4 = PathBuf::new();
-        // f4. push("[MingY] Machikado Mazoku S2 [7][1080p][CHS].mp4");
-        // let mut f5 = PathBuf::new();
-        // f5.push("[MingY] Machikado Mazoku S2 [08v2][1080p][CHS].mp4");
-        // let mut f6 = PathBuf::new();
-        // f6. push("[MingY] Machikado Mazoku S2 [9v2][1080p][CHS&JPN].mp4");
-        // let mut f7 = PathBuf::new();
-        // f7. push("D:\\1\\2\\3\\video1.sc.ass");
-        // let mut f8 = PathBuf::new();
-        // f8. push("D:\\1\\2\\3\\video1.tc.ass");
-        // let mut v = vec![f1,f2,f3,f4,f5,f6];
-        // println!("原始数据：{:?}",&v);
-        // file_sort(&mut v);
-        // println!("排序数据：{:?}",&v);
-        // let files = name_extension(v);
-        let access_token = env::var("BGM_RC_ACCESS_TOKEN").expect("ACCESS_TOKEN must be set");
-
-        let ep = Ep::get("299673",&access_token);
-        println!("{:?}\n{:?}",ep.name,ep.year);
-
+        let result = 2 + 2;
+        assert_eq!(result, 4);
+    }
+    #[test]
+    fn test_bgm() {
+        let bgm = Bgm::new();
+        let bgm = bgm.get("孤独摇滚");
+        println!("{:?}",bgm);
+    }
+    #[test]
+    fn test_ep() {
+        let ep = Ep::get("388190",""); // 注意：这里需要有效的 access_token 才能成功获取数据
+        println!("{:?}",ep);
+    }
+    #[test]
+    fn test_file_sort() {
+        let mut v = vec![
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 11 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 01 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 02 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 03 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 04 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 05 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 06 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 07 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 08 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 09 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 10 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+            PathBuf::from("[SweetSub&LoliHouse] Bocchi the Rock! - 12 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"),
+        ];
+        let v = file_sort(&mut v);
+        println!("{:?}",v);
     }
 
-}
+    // 添加新的测试结构体和测试函数
+    #[derive(Serialize, Deserialize, PartialEq, Debug)] // 添加 PartialEq 和 Debug 用于比较和打印
+    struct MiniserdeTestStruct {
+        name: String,
+        value: i32,
+        enabled: bool,
+    }
 
+
+    #[test]
+    fn test_serde_json_serde() {
+        let original_data = MiniserdeTestStruct {
+            name: "test".to_string(),
+            value: 123,
+            enabled: true,
+        };
+
+        // 序列化
+        let json_string = json::to_string(&original_data); // miniserde::json::to_string is infallible
+        println!("Serialized JSON: {}", json_string);
+
+        // 反序列化
+        let deserialized_data: MiniserdeTestStruct = json::from_str(&json_string).unwrap();
+        println!("Deserialized data: {:?}", deserialized_data);
+
+        // 验证
+        assert_eq!(original_data, deserialized_data);
+    }
+}
