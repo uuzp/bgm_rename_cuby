@@ -1,232 +1,208 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+use fltk::{
+    app,
+    browser::FileBrowser,
+    button::Button,
+    dialog::FileDialog,
+    enums::{Event, Color},
+    group::Flex,
+    input::Input,
+    prelude::*,
+    text::{TextBuffer, TextDisplay},
+    window::Window,
+};
+use std::cell::RefCell;
+use std::path::Path;
+use std::rc::Rc;
 
-use std::{cell::RefCell, env, path::PathBuf, rc::Rc};
-use fltk::{app, prelude::{WidgetExt, BrowserExt, WidgetBase, GroupExt, InputExt, WindowExt}, window::{WindowType, Window}, browser::MultiBrowser, input::Input, button::Button,dialog, image, group::{Tabs, Group}};
-use cuby::{Msg, Bgm};
+const WINDOW_WIDTH: i32 = 800;
+const WINDOW_HEIGHT: i32 = 600;
+const HALF_WIDTH: i32 = WINDOW_WIDTH / 2;
 
 fn main() {
-    // GUI
     let app = app::App::default().with_scheme(app::Scheme::Gtk);
-    app::background(221, 221, 221);
+    let mut wind = Window::new(
+        100,
+        100,
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+        "File Explorer and Search",
+    );
 
-    // 使用 Rc<RefCell<>> 包装需要跨线程访问的控件
-    let i1_rc = Rc::new(RefCell::new(Input::default()));
-    let i2_rc = Rc::new(RefCell::new(Input::default()));
-    let br1_rc = Rc::new(RefCell::new(MultiBrowser::default()));
-    let br2_rc = Rc::new(RefCell::new(MultiBrowser::default()));
-    let b1_rc = Rc::new(RefCell::new(Button::default()));
-    let b2_rc = Rc::new(RefCell::new(Button::default()));
-    let b3_rc = Rc::new(RefCell::new(Button::default()));
-    let b4_rc = Rc::new(RefCell::new(Button::default())); // "<=" button
-    let b5_rc = Rc::new(RefCell::new(Button::default())); // "🔎" button
-    let b6_rc = Rc::new(RefCell::new(Button::default())); // "Link" button
-    let b7_rc = Rc::new(RefCell::new(Button::default())); // "Start" button
+    let mut main_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
+    main_flex.set_type(fltk::group::FlexType::Row); // 水平排列
 
+    // 左半部分
+    let mut left_flex = Flex::new(0, 0, HALF_WIDTH, WINDOW_HEIGHT, "");
+    left_flex.set_type(fltk::group::FlexType::Column); // 垂直排列
+    left_flex.set_margin(5); // 添加一些边距
 
-    // 主窗口
-    let mut w = Window::new(602, 502, 820, 320, "cuby");
-    w.set_type(WindowType::Normal);
-    w.set_label_size(20);
+    let mut button_row_flex = Flex::new(0, 0, 0, 30, ""); // 高度固定，宽度由 left_flex 控制
+    button_row_flex.set_type(fltk::group::FlexType::Row);
+    let mut btn_choose_folder = Button::new(0, 0, 0, 0, "Choose Folder"); // 大小由 Flex 控制
+    let _btn_done = Button::new(0, 0, 0, 0, "完成"); // 大小由 Flex 控制
+    button_row_flex.end();
+    left_flex.fixed(&button_row_flex, 30); // 固定按钮行的高度
 
-    // 创建 Tabs 控件，留出底部空间
-    let mut tabs = Tabs::new(0, 0, w.width(), w.height() - 60, "");
+    let mut file_browser = FileBrowser::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
+    file_browser.set_selection_color(Color::Yellow);
+    file_browser.set_type(fltk::browser::BrowserType::Hold); // 单选模式
+    file_browser.set_damage(true); // Ensure redraws
 
-    // Tab 1: 主界面
-    let mut grp1 = Group::new(0, 25, tabs.width(), tabs.height() - 25, "主界面\t\t");
-    grp1.begin();
-    // 在 Tab 1 中创建主界面控件 (坐标相对于 grp1 的左上角，增加垂直偏移)
-    *i1_rc.borrow_mut() = Input::new(50, 10 + 30, 500, 25, None);
-    *b1_rc.borrow_mut() = Button::new(10, 10 + 30, 25, 25, "➕");
-    *br1_rc.borrow_mut() = MultiBrowser::new(50, 50 + 30, 500, 150, None); // Adjusted height
-    let widths = &[260,40,200];
-    br1_rc.borrow_mut().set_column_widths(widths);
-    br1_rc.borrow_mut().set_column_char('\t');
-    *b2_rc.borrow_mut() = Button::new(10, 50 + 30, 25, 25, "➕");
-    *b3_rc.borrow_mut() = Button::new(10, 75 + 30, 25, 25, "➖");
-    grp1.end();
+    // For drag-and-drop reordering
+    let dragged_line_index: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
+    
+    let d_idx_for_handle = dragged_line_index.clone();
 
-    // Tab 2: 搜索功能
-    let mut grp2 = Group::new(0, 25, tabs.width(), tabs.height() - 25, "搜索\t\t");
-    grp2.begin();
-    // 在 Tab 2 中创建搜索控件 (坐标相对于 grp2 的左上角，增加垂直偏移)
-    *i2_rc.borrow_mut() = Input::new(10, 10 + 30, 160, 25, None);
-    *b5_rc.borrow_mut() = Button::new(180, 10 + 30, 25, 25, "🔎");
-    *br2_rc.borrow_mut() = MultiBrowser::new(10, 50 + 30, 200, 150, None); // Adjusted position and height
-    *b4_rc.borrow_mut() = Button::new(220, 50 + 30, 40, 25, "<="); // Moved from Tab 1
-    b4_rc.borrow_mut().set_label_size(20);
-    grp2.end();
-
-    tabs.end(); // 结束 Tabs 组
-
-    // 底部按钮 (放在 Tabs 下方)
-    *b6_rc.borrow_mut() = Button::new(600, 265, 70, 50, "Link");
-    *b7_rc.borrow_mut() = Button::new(700, 265, 100, 50, "Start");
-
-
-    // 主窗口绘制结束
-    w.end();
-    // 显示主窗口
-    w.show();
-    // 设置窗口图标
-    let a = cuby::get_png();
-    let img = image::PngImage::from_data(a.data.as_ref()).unwrap();
-    w.set_icon(Some(img));
-
-    // 消息传递 (更新 emit 调用以使用 Rc<RefCell<>>)
-    let (s,r) = app::channel::<Msg>();
-    b1_rc.borrow_mut().emit(s, Msg::AddOut);
-    b2_rc.borrow_mut().emit(s, Msg::AddIn);
-    b3_rc.borrow_mut().emit(s, Msg::RemoveOut);
-    b4_rc.borrow_mut().emit(s, Msg::Set); // b4 is now in Tab 2
-    b5_rc.borrow_mut().emit(s, Msg::Search);
-    b6_rc.borrow_mut().emit(s, Msg::Link); // b6 is now outside tabs
-    b7_rc.borrow_mut().emit(s, Msg::Start); // b7 is now outside tabs
-
-    // 授权码
-    let access_token = env::var("BGM_RC_ACCESS_TOKEN").ok().unwrap_or("NULL".to_string());
-    // 临时数据，堆占用内存，或许可以用数据库代替？
-    let in_paths:Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
-    let bgms:Rc<RefCell<Vec<(String,String)>>> = Rc::new(RefCell::new(Vec::new()));
-    let search_bgms:Rc<RefCell<Vec<Bgm>>> = Rc::new(RefCell::new(Vec::new()));
-
-    // 消息接收 (更新消息处理逻辑以使用 Rc<RefCell<>>)
-    while app.wait() {
-        if let Some(msg) = r.recv(){
-            match msg {
-                Msg::AddOut => {
-                    // 选择&&显示输出文件夹
-                    i1_rc.borrow_mut().set_value(cuby::select_folder().to_str().unwrap());
-
+    file_browser.handle(move |b, ev| {
+        let mut d_idx = d_idx_for_handle.borrow_mut();
+        
+        match ev {
+            Event::Push => {
+                if app::event_clicks() {
+                    // 获取FLTK FileBrowser自己检测到的行号
+                    let line_num = b.value();
+                    if line_num > 1 { // 忽略头部行
+                        *d_idx = Some(line_num);
+                        
+                        // 打印选中行的信息用于调试
+                        if let Some(text) = b.text(line_num) {
+                            println!("开始拖拽第 {} 行: \"{}\"", line_num, text);
+                        }
+                        
+                        return true;
+                    }
+                    *d_idx = None;
                 }
-                Msg::AddIn => {
-                    // 选择输入文件夹
-                    let p = cuby::select_folder();
-                    let p = match p.to_str() {
-                        None => continue,
-                        Some(_) => p,
-                    };
-                    // 显示输入文件夹
-                    br1_rc.borrow_mut().add(&p.to_str().unwrap().to_string());
-                    // 存储数据
-                    in_paths.borrow_mut().push(p);
-
-                }
-                Msg::RemoveOut => {
-                    // 删除选择的行
-                    let line = br1_rc.borrow().value();
-                    br1_rc.borrow_mut().remove(line);
-                    // 删除数据
-                    in_paths.borrow_mut().remove((line as usize)-1);
-
-                }
-                Msg::Set => {
-                    // 错误处理，防止选择番剧为空。
-                    match br2_rc.borrow().value() > 0 {
-                        true => (),
-                        false => {
-                            dialog::message_default("未选择番剧！");
-                            continue;
+                false
+            },
+            Event::Drag => {
+                if d_idx.is_some() {
+                    // 拖拽期间，让行选中效果跟随鼠标位置
+                    // 让FLTK自行处理鼠标位置与行号的对应关系
+                    let mouse_y = app::event_y();
+                    let widget_y = b.y();
+                    let widget_h = b.h();
+                    
+                    if mouse_y >= widget_y && mouse_y < widget_y + widget_h {
+                        // 传递事件让FileBrowser内部自行检测行
+                        b.handle_event(Event::Move);
+                        
+                        // 获取当前鼠标悬停在哪一行
+                        let drag_to_line = b.value();
+                        
+                        // 打印当前拖拽位置的行号
+                        if drag_to_line > 0 {
+                            println!("拖拽到第 {} 行", drag_to_line);
                         }
                     }
-
-                    // 将选择的番剧名和id存储到bgms
-                    let u = (br2_rc.borrow().value() as usize)-1;
-                    let s = (search_bgms.borrow()[0].id[u].clone(),search_bgms.borrow()[0].name[u].clone());
-                    bgms.borrow_mut().push(s.clone());
-                    // 错误处理，判断对应的输入文件夹是否存在。
-                    let b = bgms.borrow().len() > in_paths.borrow().len();// 因为引用规则限制，必须使用中间变量。
-                    // 若不存在，删除添加的数据，并跳出循环。
-                    match b  {
-                        true => {
-                            dialog::message_default("未选择番剧文件夹！");
-                            bgms.borrow_mut().pop();
-                            continue;
-                        },
-                        false => (),
-                    };
-                    // 先清除显示内容
-                    search_bgms.borrow_mut().clear();
-                    br1_rc.borrow_mut().clear();
-                    br2_rc.borrow_mut().clear();
-                    // 然后将从br2中选择的番剧名结合输入文件夹路径显示到br1列表
-                    let len = bgms.borrow().len();
-                    for i in 0..len{
-                        let s = format!("{}\t => \t{}",in_paths.borrow()[i].to_str().unwrap(),bgms.borrow()[i].1);
-                        br1_rc.borrow_mut().add(&s);
+                    
+                    return true;
+                }
+                false
+            },
+            Event::Released => {
+                if let Some(from_line) = d_idx.take() {
+                    // 获取释放位置的行号
+                    let to_line = b.value();
+                    
+                    println!("从第 {} 行移动到第 {} 行", from_line, to_line);
+                    
+                    // 执行移动操作
+                    if to_line > 1 && to_line != from_line {
+                        // 在移动前打印源和目标行的内容
+                        if let Some(from_text) = b.text(from_line) {
+                            println!("源行 {} 内容: \"{}\"", from_line, from_text);
+                        }
+                        
+                        if let Some(to_text) = b.text(to_line) {
+                            println!("目标行 {} 内容: \"{}\"", to_line, to_text);
+                        }
+                        
+                        // 根据您的测试，参数顺序是 (to, from)
+                        b.move_item(to_line, from_line);
+                        
+                        // 高亮目标行
+                        b.select(to_line);
+                        
+                        // 打印移动后的内容
+                        if let Some(new_text) = b.text(to_line) {
+                            println!("移动后位置 {} 内容: \"{}\"", to_line, new_text);
+                        }
                     }
-                    // 显示未对应番剧的输入文件夹路径
-                    for s in in_paths.borrow().iter().skip(len) {
-                        br1_rc.borrow_mut().add(&s.to_str().unwrap());
-                    }
-
+                    
+                    return true;
                 }
-                Msg::Search => {
-                    // 获取搜索关键词
-                    let keywords = i2_rc.borrow().value();
-                    // 获取搜索到的番剧名和id
-                    let bgms = Bgm::new().get(&keywords);
-                    // 存储数据，并显示。
-                    search_bgms.borrow_mut().clear();
-                    search_bgms.borrow_mut().push(bgms.clone());
-                    br2_rc.borrow_mut().clear();
-                    for s in bgms.name {
-                        br2_rc.borrow_mut().add(&s)
-                    }
-                }
-                Msg::Link => {
-                    // 获取输出文件夹路径
-                    let path = cuby::set_out_path(&i1_rc.borrow().value());
-                    // 错误处理，防止输出文件夹路径为空。
-                    let out_path = match path.to_str().unwrap().is_empty() {
-                        true => {
-                            dialog::message_default("未设置输出文件夹！");
-                            continue;
-                        },
-                        false => path,
-                    };
-                    // 获取输入文件夹路径
-                    let v_inpaths:Vec<PathBuf> = in_paths.borrow().clone();
-                    // 获取番剧名，与输出文件夹路径结合，获得每个番剧的输出文件夹。
-                    let v_names:Vec<String> = bgms.borrow().clone().into_iter().map(|x| x.1).collect();
-                    let v_outpaths = cuby::get_out_file_paths(out_path, v_names);
-                    // 新建每个番剧的输出文件夹
-                    cuby::mkdir(&v_outpaths);
-                    // 开始硬链接视频文件和复制字幕
-                    cuby::just_link(v_inpaths,v_outpaths);
-
-                    // 清理数据
-                    br1_rc.borrow_mut().clear();
-                    in_paths.borrow_mut().clear();
-                    bgms.borrow_mut().clear();
-
-                }
-                Msg::Start => {
-                    // 获取输出文件夹路径
-                    let path = cuby::set_out_path(&i1_rc.borrow().value());
-                    // 错误处理，防止输出文件夹路径为空。
-                    let path = match path.to_str().unwrap().is_empty() {
-                        true => {
-                            dialog::message_default("未设置输出文件夹！");
-                            continue;
-                        },
-                        false => path,
-                    };
-                    // 获取输入文件夹路径
-                    let v_inpaths = in_paths.borrow().clone();
-                    // 获取番剧名和id
-                    let v_bgms= bgms.borrow().clone();
-                    // 获取每个番剧文件夹里的每个截止到集数名的路径（无后缀名）
-                    let (v_ep,v_outpaths) = cuby::out_ep_path(path, v_bgms,&access_token);
-                    // 新建每个番剧的输出文件夹
-                    cuby::mkdir(&v_outpaths);
-                    // 开始硬链接、复制和重命名。
-                    cuby::link_rename(v_inpaths , v_outpaths, v_ep);
-                    // 清理数据。
-                    br1_rc.borrow_mut().clear();
-                    in_paths.borrow_mut().clear();
-                    bgms.borrow_mut().clear();
-                }
-           }
+                false
+            },
+            _ => false,
         }
-    }
+    });
+
+    let mut file_browser_clone = file_browser.clone();
+    btn_choose_folder.set_callback(move |_| {
+        let mut dialog = FileDialog::new(fltk::dialog::FileDialogType::BrowseDir);
+        dialog.show();
+        let chosen_path = dialog.filename();
+        if !chosen_path.as_os_str().is_empty() {
+            let path = Path::new(&chosen_path);
+            if path.is_dir() {
+                file_browser_clone.clear(); // 清空浏览器
+                if let Some(folder_name) = path.file_name().and_then(|n| n.to_str()) {
+                    file_browser_clone.add(&format!("├─ {}", folder_name)); // 修改文件夹名称格式
+                }
+
+                if let Ok(entries) = std::fs::read_dir(path) {
+                    for entry in entries {
+                        if let Ok(entry) = entry {
+                            let file_path = entry.path();
+                            if file_path.is_file() {
+                                if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
+                                    match ext.to_lowercase().as_str() {
+                                        "mp4" | "avi" | "mkv" | "mov" | "wmv" | "flv" | "webm" => {
+                                            if let Some(file_name) =
+                                                file_path.file_name().and_then(|n| n.to_str())
+                                            {
+                                                file_browser_clone.add(&format!("├─── {}", file_name)); // 修改文件名称格式，移除空格，延长横线
+                                            }
+                                        }
+                                        _ => (),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    left_flex.end();
+    main_flex.add(&left_flex); // 将左侧 Flex 添加到主 Flex
+
+    // 右半部分
+    let mut right_flex = Flex::new(HALF_WIDTH, 0, HALF_WIDTH, WINDOW_HEIGHT, "");
+    right_flex.set_type(fltk::group::FlexType::Column);
+    right_flex.set_margin(5);
+
+    let mut search_input = Input::new(0, 0, 0, 30, ""); // 高度固定，宽度由 Flex 控制
+    search_input.set_tooltip("Enter search query here");
+    right_flex.fixed(&search_input, 30); // 固定搜索框高度
+
+    let mut search_results_display = TextDisplay::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
+    let buffer = TextBuffer::default();
+    search_results_display.set_buffer(buffer);
+    search_results_display.set_text_size(14);
+    search_results_display.wrap_mode(fltk::text::WrapMode::AtBounds, 0);
+
+    right_flex.end();
+    main_flex.add(&right_flex); // 将右侧 Flex 添加到主 Flex
+
+    main_flex.end();
+    wind.add(&main_flex); // 将主 Flex 添加到窗口
+
+    wind.resizable(&main_flex); // 使主 Flex 可调整大小
+    wind.end();
+    wind.show();
+
+    app.run().unwrap();
 }
