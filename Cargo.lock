@@ -390,6 +390,7 @@ dependencies = [
  "minreq",
  "rfd",
  "rust-embed",
+ "urlencoding",
 ]
 
 [[package]]

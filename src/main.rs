@@ -1,18 +1,147 @@
 use fltk::{
     app,
-    browser::FileBrowser,
+    browser::{FileBrowser, MultiBrowser},
     button::Button,
     dialog::FileDialog,
     enums::{Event, Color},
     group::Flex,
     input::Input,
     prelude::*,
-    text::{TextBuffer, TextDisplay},
     window::Window,
 };
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
+use miniserde::{Deserialize, Serialize};
+use miniserde::json;
+use minreq;
+use urlencoding;
+
+// 从lib.rs复制过来，直接在main.rs中定义
+#[derive(Deserialize, Serialize)]
+struct SearchResult {
+    list: Vec<Subject>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Subject {
+    id: u64,
+    name: String,
+    name_cn: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct EpisodesResult {
+    data: Vec<Episode>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Episode {
+    airdate: String,
+    sort: u64,
+    name_cn: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Bgm {
+    pub name: Vec<String>,
+    pub id: Vec<String>,
+}
+
+impl Bgm {
+    pub fn new() -> Self {
+        Self {
+            name: Vec::new(),
+            id: Vec::new(),
+        }
+    }      pub fn get(mut self, keywords: &str) -> Self {
+        // 对搜索关键词进行URL编码
+        let encoded_keywords = urlencoding::encode(keywords);
+        let url = format!(
+            "https://api.bgm.tv/search/subject/{}?type=2&responseGroup=small",
+            encoded_keywords
+        );
+        // 使用 minreq 发送 GET 请求并获取文本
+        let response = minreq::get(url).send().unwrap();
+        let response_text = response.as_str().unwrap();
+        let search_result: SearchResult = json::from_str(&response_text).unwrap();
+
+        // 存储番剧数据到Bgm结构体
+        for subject in search_result.list {
+            self.id.push(subject.id.to_string());
+            self.name.push(
+                match subject.name_cn.is_empty() {
+                    true => subject.name,
+                    false => subject.name_cn,
+                }
+            );
+        }
+        self
+    }
+}
+
+#[derive(Debug, Clone)] // 添加 Clone trait
+pub struct Ep {
+    pub name: Vec<String>,
+    pub year: i32,
+}
+
+impl Ep {
+    pub fn new() -> Self{
+        Self { name: Vec::new(), year: 1970 }
+    } 
+    
+    pub fn get(id: &str) -> Self {
+        let url = format!(
+            "https://api.bgm.tv/v0/episodes?subject_id={}&type=0&limit=100&offset=0",
+            id
+        );
+        // 使用 minreq 发送 GET 请求
+        let response = minreq::get(url)
+            .with_header("User-Agent", "uuzp/bgm_rename_cuby")
+            .send()
+            .unwrap();
+        // 获取响应文本并使用 miniserde 解析
+        let response_text = response.as_str().unwrap();
+        let episodes_result: EpisodesResult = json::from_str(&response_text).unwrap();
+
+        let mut ep_list = Vec::new();
+        let mut epn = Vec::new();
+        let mut year = 1970; // 默认年份
+
+        // 从第一个剧集中提取年份
+        if let Some(first_episode) = episodes_result.data.first() {
+             // 安全地解析年份，如果失败则使用默认值
+             year = first_episode.airdate.get(0..4).unwrap_or("").parse().unwrap_or(1970);
+        }
+
+        // 提取剧集编号和中文名称
+        for episode in episodes_result.data {
+            epn.push(episode.sort);
+            let s = episode.name_cn;
+            // 替换 HTML 实体
+            let s = s.replace("<", "＜");
+            let s = s.replace(">", "＞");
+            ep_list.push(s);
+        }
+
+        let mut name = vec![];
+        // 计算最大剧集编号所需的位数，用于格式化前导零
+        let max_ep_num = epn.iter().max().cloned().unwrap_or(0);
+        // 避免 log10(0) 导致 panic
+        let num_digits = if max_ep_num == 0 { 1 } else { (max_ep_num as f64).log10() as usize + 1 };
+
+        // 格式化剧集名称
+        for i in 0..ep_list.len() {
+            // 使用计算出的位数格式化剧集编号，添加前导零
+            let ep_num_str = format!("{:0width$}", epn[i], width = num_digits);
+            let ep = format!("ep{} - {}", ep_num_str, ep_list[i]);
+            name.push(ep);
+        }
+
+        Ep { name, year }
+    }
+}
 
 const WINDOW_WIDTH: i32 = 800;
 const WINDOW_HEIGHT: i32 = 600;
@@ -26,9 +155,7 @@ fn main() {
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         "File Explorer and Search",
-    );
-
-    let mut main_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
+    );    let mut main_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
     main_flex.set_type(fltk::group::FlexType::Row); // 水平排列
 
     // 左半部分
@@ -38,8 +165,8 @@ fn main() {
 
     let mut button_row_flex = Flex::new(0, 0, 0, 30, ""); // 高度固定，宽度由 left_flex 控制
     button_row_flex.set_type(fltk::group::FlexType::Row);
-    let mut btn_choose_folder = Button::new(0, 0, 0, 0, "Choose Folder"); // 大小由 Flex 控制
-    let _btn_done = Button::new(0, 0, 0, 0, "完成"); // 大小由 Flex 控制
+    let mut btn_choose_folder = Button::new(0, 0, 0, 0, "选择文件夹"); // 大小由 Flex 控制
+    let mut btn_done = Button::new(0, 0, 0, 0, "完成"); // 大小由 Flex 控制
     button_row_flex.end();
     left_flex.fixed(&button_row_flex, 30); // 固定按钮行的高度
 
@@ -177,22 +304,23 @@ fn main() {
     });
 
     left_flex.end();
-    main_flex.add(&left_flex); // 将左侧 Flex 添加到主 Flex
-
-    // 右半部分
+    main_flex.add(&left_flex); // 将左侧 Flex 添加到主 Flex    // 右半部分
     let mut right_flex = Flex::new(HALF_WIDTH, 0, HALF_WIDTH, WINDOW_HEIGHT, "");
     right_flex.set_type(fltk::group::FlexType::Column);
     right_flex.set_margin(5);
 
-    let mut search_input = Input::new(0, 0, 0, 30, ""); // 高度固定，宽度由 Flex 控制
-    search_input.set_tooltip("Enter search query here");
-    right_flex.fixed(&search_input, 30); // 固定搜索框高度
+    let mut search_row_flex = Flex::new(0, 0, 0, 30, ""); // 高度固定，宽度由 right_flex 控制
+    search_row_flex.set_type(fltk::group::FlexType::Row);
+    let mut search_input = Input::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
+    search_input.set_tooltip("输入番剧名称关键字");
+    let mut search_button = Button::new(0, 0, 40, 0, "🔎"); // 宽度固定，高度由 Flex 控制
+    search_row_flex.fixed(&search_button, 40); // 固定搜索按钮宽度
+    search_row_flex.end();
+    right_flex.fixed(&search_row_flex, 30); // 固定搜索行高度
 
-    let mut search_results_display = TextDisplay::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
-    let buffer = TextBuffer::default();
-    search_results_display.set_buffer(buffer);
-    search_results_display.set_text_size(14);
-    search_results_display.wrap_mode(fltk::text::WrapMode::AtBounds, 0);
+    let mut search_results_browser = MultiBrowser::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
+    search_results_browser.set_selection_color(Color::Yellow);
+    search_results_browser.set_type(fltk::browser::BrowserType::Hold); // 单选模式
 
     right_flex.end();
     main_flex.add(&right_flex); // 将右侧 Flex 添加到主 Flex
@@ -200,9 +328,110 @@ fn main() {
     main_flex.end();
     wind.add(&main_flex); // 将主 Flex 添加到窗口
 
-    wind.resizable(&main_flex); // 使主 Flex 可调整大小
-    wind.end();
+    wind.resizable(&main_flex); // 使主 Flex 可调整大小    wind.end();
     wind.show();
+
+    // 创建共享数据结构
+    let search_results: Rc<RefCell<Option<Bgm>>> = Rc::new(RefCell::new(None));
+    let episode_list: Rc<RefCell<Option<Ep>>> = Rc::new(RefCell::new(None));
+    let selected_anime_id: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+      // 设置搜索按钮回调
+    let search_input_copy = search_input.clone();
+    let search_results_copy = search_results.clone();
+    let mut search_results_browser_copy = search_results_browser.clone();
+    
+    search_button.set_callback(move |_| {
+        let query = search_input_copy.value();
+        if !query.is_empty() {
+            // 执行搜索
+            let bgm = Bgm::new().get(&query);
+            
+            // 清空并更新搜索结果列表
+            search_results_browser_copy.clear();
+            for name in &bgm.name {
+                search_results_browser_copy.add(name);
+            }
+            
+            // 保存搜索结果
+            *search_results_copy.borrow_mut() = Some(bgm);
+        }
+    });    // 设置搜索结果双击事件处理
+    let search_results_copy = search_results.clone();
+    let episode_list_copy = episode_list.clone();
+    let selected_anime_id_copy = selected_anime_id.clone();
+    
+    search_results_browser.set_callback(move |b| {
+        if app::event_clicks() {
+            let line = b.value();
+            if line > 0 && line <= b.size() {
+                if let Some(bgm) = &*search_results_copy.borrow() {
+                    let idx = (line as usize) - 1;
+                    if idx < bgm.id.len() {
+                        let anime_id = &bgm.id[idx];
+                        
+                        // 获取选中番剧的剧集信息
+                        let ep = Ep::get(anime_id);
+                        
+                        // 清空并显示剧集列表
+                        b.clear();
+                        for episode_name in &ep.name {
+                            b.add(episode_name);
+                        }
+                        
+                        // 保存选中的番剧ID和剧集信息
+                        *selected_anime_id_copy.borrow_mut() = Some(anime_id.clone());
+                        *episode_list_copy.borrow_mut() = Some(ep);
+                    }
+                }
+            }
+        }
+    });
+
+    // 设置"完成"按钮回调
+    let file_browser_copy = file_browser.clone();
+    let episode_list_copy = episode_list.clone();
+      btn_done.set_callback(move |_| {
+        // 获取文件浏览器中的文件列表（从第2行开始）
+        let mut file_names = Vec::new();
+        for i in 2..=file_browser_copy.size() {
+            if let Some(text) = file_browser_copy.text(i) {
+                if text.starts_with("├───") {
+                    // 使用字符级别的操作而不是字节级别的索引
+                    // 跳过前5个字符而不是字节
+                    file_names.push(text.chars().skip(5).collect::<String>()); // 去除前缀 "├─── "
+                }
+            }
+        }
+          // 获取剧集列表
+        if let Some(ep) = &*episode_list_copy.borrow() {
+            // 创建文件名与剧集对应的列表
+            let mut matched_pairs = Vec::new();
+            
+            // 打印匹配结果
+            println!("文件与剧集匹配结果:");
+            
+            let mut matched_count = 0;
+            for (i, file_name) in file_names.iter().enumerate() {
+                if i < ep.name.len() {
+                    println!("{} -> {}", file_name, ep.name[i]);
+                    matched_pairs.push((file_name.clone(), ep.name[i].clone()));
+                    matched_count += 1;
+                }
+            }
+            
+            println!("成功匹配: {}/{} 个文件", matched_count, file_names.len());
+            
+            if matched_count < file_names.len() {
+                println!("警告: 有 {} 个文件没有对应的剧集信息", 
+                    file_names.len() - matched_count);
+            }
+            
+            // 这里可以将matched_pairs传递给其他函数进行进一步处理
+            println!("总共匹配了 {} 个文件与剧集对", matched_pairs.len());
+        } else {
+            println!("错误: 未选择任何番剧或未获取到剧集信息");
+        }
+    });
 
     app.run().unwrap();
 }
