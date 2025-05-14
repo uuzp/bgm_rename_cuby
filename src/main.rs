@@ -173,32 +173,88 @@ fn main() {
     let mut file_browser = FileBrowser::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
     file_browser.set_selection_color(Color::Yellow);
     file_browser.set_type(fltk::browser::BrowserType::Hold); // 单选模式
-    file_browser.set_damage(true); // Ensure redraws
-
-    // For drag-and-drop reordering
+    file_browser.set_damage(true); // Ensure redraws    // For drag-and-drop reordering
     let dragged_line_index: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
+    // 为空格键标记添加一个新的变量
+    let marked_line_index: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
     
     let d_idx_for_handle = dragged_line_index.clone();
-
+    let marked_idx_for_handle = marked_line_index.clone();
+    
     file_browser.handle(move |b, ev| {
         let mut d_idx = d_idx_for_handle.borrow_mut();
+        let mut marked_idx = marked_idx_for_handle.borrow_mut();
         
         match ev {
             Event::Push => {
-                if app::event_clicks() {
-                    // 获取FLTK FileBrowser自己检测到的行号
-                    let line_num = b.value();
-                    if line_num > 1 { // 忽略头部行
-                        *d_idx = Some(line_num);
-                        
-                        // 打印选中行的信息用于调试
-                        if let Some(text) = b.text(line_num) {
-                            println!("开始拖拽第 {} 行: \"{}\"", line_num, text);
+                // 获取FLTK FileBrowser自己检测到的行号（单击即可开始拖拽）
+                let line_num = b.value();
+                if line_num > 1 { // 忽略头部行
+                    *d_idx = Some(line_num);
+                    
+                    // 打印选中行的信息用于调试
+                    if let Some(text) = b.text(line_num) {
+                        println!("开始拖拽第 {} 行: \"{}\"", line_num, text);
+                    }
+                    
+                    return true;
+                }
+                *d_idx = None;
+                false
+            },            // 添加对键盘事件的处理
+            Event::KeyDown => {                // 检查是否按下空格键
+                if app::event_key() == fltk::enums::Key::from_char(' ') {
+                    let current_line = b.value();
+                    if current_line > 1 { // 忽略头部行
+                        if let Some(first_marked_line) = *marked_idx {
+                            // 已有标记的行，执行交换操作
+                            println!("交换第 {} 行和第 {} 行", first_marked_line, current_line);
+                            
+                            if first_marked_line != current_line {
+                                // 获取两行的文本内容
+                                if let (Some(first_text), Some(second_text)) = (b.text(first_marked_line), b.text(current_line)) {
+                                    println!("交换内容: \"{}\" <-> \"{}\"", first_text, second_text);
+                                    
+                                    // 收集浏览器中所有行的文本
+                                    let mut all_lines = Vec::new();
+                                    for i in 1..=b.size() {
+                                        if let Some(text) = b.text(i) {
+                                            all_lines.push(text.to_string());
+                                        }
+                                    }
+                                    
+                                    // 交换指定行的内容
+                                    let first_idx = first_marked_line as usize - 1; // 转为0-based索引
+                                    let second_idx = current_line as usize - 1; // 转为0-based索引
+                                    if first_idx < all_lines.len() && second_idx < all_lines.len() {
+                                        all_lines.swap(first_idx, second_idx);
+                                    }
+                                    
+                                    // 清空浏览器
+                                    b.clear();
+                                    
+                                    // 重新添加所有行
+                                    for line in all_lines {
+                                        b.add(&line);
+                                    }
+                                }
+                                
+                                // 高亮当前行
+                                b.select(current_line);
+                            }
+                            
+                            // 清除标记
+                            *marked_idx = None;
+                        } else {
+                            // 标记当前行
+                            *marked_idx = Some(current_line);
+                            println!("标记第 {} 行", current_line);
+                            
+                            // 高亮当前行以提供视觉反馈
+                            b.select(current_line);
                         }
-                        
                         return true;
                     }
-                    *d_idx = None;
                 }
                 false
             },
@@ -310,8 +366,7 @@ fn main() {
     right_flex.set_margin(5);
 
     let mut search_row_flex = Flex::new(0, 0, 0, 30, ""); // 高度固定，宽度由 right_flex 控制
-    search_row_flex.set_type(fltk::group::FlexType::Row);
-    let mut search_input = Input::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
+    search_row_flex.set_type(fltk::group::FlexType::Row);    let mut search_input = Input::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
     search_input.set_tooltip("输入番剧名称关键字");
     let mut search_button = Button::new(0, 0, 40, 0, "🔎"); // 宽度固定，高度由 Flex 控制
     search_row_flex.fixed(&search_button, 40); // 固定搜索按钮宽度
@@ -334,28 +389,59 @@ fn main() {
     // 创建共享数据结构
     let search_results: Rc<RefCell<Option<Bgm>>> = Rc::new(RefCell::new(None));
     let episode_list: Rc<RefCell<Option<Ep>>> = Rc::new(RefCell::new(None));
-    let selected_anime_id: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
-      // 设置搜索按钮回调
-    let search_input_copy = search_input.clone();
-    let search_results_copy = search_results.clone();
-    let mut search_results_browser_copy = search_results_browser.clone();
-    
-    search_button.set_callback(move |_| {
-        let query = search_input_copy.value();
-        if !query.is_empty() {
-            // 执行搜索
-            let bgm = Bgm::new().get(&query);
-            
-            // 清空并更新搜索结果列表
-            search_results_browser_copy.clear();
-            for name in &bgm.name {
-                search_results_browser_copy.add(name);
+    let selected_anime_id: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));    // 为搜索按钮设置回调
+    {
+        let search_input_copy = search_input.clone();
+        let search_results_copy = search_results.clone();
+        let mut search_results_browser_copy = search_results_browser.clone();
+        
+        search_button.set_callback(move |_| {
+            // 执行搜索逻辑
+            let query = search_input_copy.value();
+            if !query.is_empty() {
+                // 执行搜索
+                let bgm = Bgm::new().get(&query);
+                
+                // 清空并更新搜索结果列表
+                search_results_browser_copy.clear();
+                for name in &bgm.name {
+                    search_results_browser_copy.add(name);
+                }
+                
+                // 保存搜索结果
+                *search_results_copy.borrow_mut() = Some(bgm);
             }
-            
-            // 保存搜索结果
-            *search_results_copy.borrow_mut() = Some(bgm);
-        }
-    });    // 设置搜索结果双击事件处理
+        });
+    }
+    
+    // 为搜索框设置回车键处理
+    {
+        let search_input_copy = search_input.clone();
+        let search_results_copy = search_results.clone();
+        let mut search_results_browser_copy = search_results_browser.clone();
+        
+        search_input.handle(move |_, ev| {
+            if ev == Event::KeyDown && app::event_key() == fltk::enums::Key::Enter {
+                // 当按下回车键时执行搜索
+                let query = search_input_copy.value();
+                if !query.is_empty() {
+                    // 执行搜索
+                    let bgm = Bgm::new().get(&query);
+                    
+                    // 清空并更新搜索结果列表
+                    search_results_browser_copy.clear();
+                    for name in &bgm.name {
+                        search_results_browser_copy.add(name);
+                    }
+                    
+                    // 保存搜索结果
+                    *search_results_copy.borrow_mut() = Some(bgm);
+                }
+                return true; // 表示事件已处理
+            }
+            false // 让其他按键由默认处理程序处理
+        });
+    }// 设置搜索结果双击事件处理
     let search_results_copy = search_results.clone();
     let episode_list_copy = episode_list.clone();
     let selected_anime_id_copy = selected_anime_id.clone();
