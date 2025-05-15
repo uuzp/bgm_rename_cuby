@@ -30,6 +30,7 @@ struct EpisodesResult {
 struct Episode {
     airdate: String,
     sort: u64,
+    name: String,
     name_cn: String,
 }
 
@@ -116,12 +117,15 @@ impl Ep {
         if let Some(first_episode) = episodes_result.data.first() {
              // 安全地解析年份，如果失败则使用默认值
              year = first_episode.airdate.get(0..4).unwrap_or("").parse().unwrap_or(1970);
-        }
-
-        // 提取剧集编号和中文名称
+        }        // 提取剧集编号和名称（优先使用中文名称，如果为空则使用原名）
         for episode in episodes_result.data {
             epn.push(episode.sort);
-            let s = episode.name_cn;
+            // 如果 name_cn 不为空，则使用 name_cn，否则使用 name
+            let s = if !episode.name_cn.is_empty() {
+                episode.name_cn
+            } else {
+                episode.name
+            };
             // 替换 HTML 实体
             let s = s.replace("<", "＜");
             let s = s.replace(">", "＞");

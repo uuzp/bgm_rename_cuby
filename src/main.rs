@@ -6,6 +6,8 @@ use fltk::{
     enums::{Event, Color},
     group::Flex,
     input::Input,
+    output::Output,
+    frame::Frame,
     prelude::*,
     window::Window,
 };
@@ -39,6 +41,7 @@ struct EpisodesResult {
 struct Episode {
     airdate: String,
     sort: u64,
+    name: String,
     name_cn: String,
 }
 
@@ -113,12 +116,15 @@ impl Ep {
         if let Some(first_episode) = episodes_result.data.first() {
              // 安全地解析年份，如果失败则使用默认值
              year = first_episode.airdate.get(0..4).unwrap_or("").parse().unwrap_or(1970);
-        }
-
-        // 提取剧集编号和中文名称
+        }        // 提取剧集编号和名称（优先使用中文名称，如果为空则使用原名）
         for episode in episodes_result.data {
             epn.push(episode.sort);
-            let s = episode.name_cn;
+            // 如果 name_cn 不为空，则使用 name_cn，否则使用 name
+            let s = if !episode.name_cn.is_empty() {
+                episode.name_cn
+            } else {
+                episode.name
+            };
             // 替换 HTML 实体
             let s = s.replace("<", "＜");
             let s = s.replace(">", "＞");
@@ -155,17 +161,25 @@ fn main() {
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         "File Explorer and Search",
-    );    let mut main_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
-    main_flex.set_type(fltk::group::FlexType::Row); // 水平排列
-
-    // 左半部分
-    let mut left_flex = Flex::new(0, 0, HALF_WIDTH, WINDOW_HEIGHT, "");
-    left_flex.set_type(fltk::group::FlexType::Column); // 垂直排列
+    );
+    
+    // 添加两个路径变量
+    let base_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let anime_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    
+    let mut main_vertical_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
+    main_vertical_flex.set_type(fltk::group::FlexType::Column); // 垂直排列
+    
+    // 创建内容区域的水平布局
+    let mut content_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 30, "");
+    content_flex.set_type(fltk::group::FlexType::Row);    // 左半部分
+    let mut left_flex = Flex::new(0, 0, HALF_WIDTH, WINDOW_HEIGHT - 30, "");    left_flex.set_type(fltk::group::FlexType::Column); // 垂直排列
     left_flex.set_margin(5); // 添加一些边距
-
+    
     let mut button_row_flex = Flex::new(0, 0, 0, 30, ""); // 高度固定，宽度由 left_flex 控制
     button_row_flex.set_type(fltk::group::FlexType::Row);
-    let mut btn_choose_folder = Button::new(0, 0, 0, 0, "选择文件夹"); // 大小由 Flex 控制
+    let mut btn_choose_base = Button::new(0, 0, 0, 0, "B"); // 按钮B - 设置源路径（显示文件列表）
+    let mut btn_choose_anime = Button::new(0, 0, 0, 0, "A"); // 按钮A - 设置目标路径
     let mut btn_done = Button::new(0, 0, 0, 0, "完成"); // 大小由 Flex 控制
     button_row_flex.end();
     left_flex.fixed(&button_row_flex, 30); // 固定按钮行的高度
@@ -189,7 +203,7 @@ fn main() {
             Event::Push => {
                 // 获取FLTK FileBrowser自己检测到的行号（单击即可开始拖拽）
                 let line_num = b.value();
-                if line_num > 1 { // 忽略头部行
+                if line_num > 0 { // 修改：不再忽略头部行，因为不再有文件夹名的头部行
                     *d_idx = Some(line_num);
                     
                     // 打印选中行的信息用于调试
@@ -205,7 +219,7 @@ fn main() {
             Event::KeyDown => {                // 检查是否按下空格键
                 if app::event_key() == fltk::enums::Key::from_char(' ') {
                     let current_line = b.value();
-                    if current_line > 1 { // 忽略头部行
+                    if current_line > 0 { // 修改：不再忽略头部行
                         if let Some(first_marked_line) = *marked_idx {
                             // 已有标记的行，执行交换操作
                             println!("交换第 {} 行和第 {} 行", first_marked_line, current_line);
@@ -291,7 +305,7 @@ fn main() {
                     println!("从第 {} 行移动到第 {} 行", from_line, to_line);
                     
                     // 执行移动操作
-                    if to_line > 1 && to_line != from_line {
+                    if to_line > 0 && to_line != from_line { // 修改：不再检查是否大于1
                         // 在移动前打印源和目标行的内容
                         if let Some(from_text) = b.text(from_line) {
                             println!("源行 {} 内容: \"{}\"", from_line, from_text);
@@ -321,52 +335,16 @@ fn main() {
         }
     });
 
-    let mut file_browser_clone = file_browser.clone();
-    btn_choose_folder.set_callback(move |_| {
-        let mut dialog = FileDialog::new(fltk::dialog::FileDialogType::BrowseDir);
-        dialog.show();
-        let chosen_path = dialog.filename();
-        if !chosen_path.as_os_str().is_empty() {
-            let path = Path::new(&chosen_path);
-            if path.is_dir() {
-                file_browser_clone.clear(); // 清空浏览器
-                if let Some(folder_name) = path.file_name().and_then(|n| n.to_str()) {
-                    file_browser_clone.add(&format!("├─ {}", folder_name)); // 修改文件夹名称格式
-                }
-
-                if let Ok(entries) = std::fs::read_dir(path) {
-                    for entry in entries {
-                        if let Ok(entry) = entry {
-                            let file_path = entry.path();
-                            if file_path.is_file() {
-                                if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
-                                    match ext.to_lowercase().as_str() {
-                                        "mp4" | "avi" | "mkv" | "mov" | "wmv" | "flv" | "webm" => {
-                                            if let Some(file_name) =
-                                                file_path.file_name().and_then(|n| n.to_str())
-                                            {
-                                                file_browser_clone.add(&format!("├─── {}", file_name)); // 修改文件名称格式，移除空格，延长横线
-                                            }
-                                        }
-                                        _ => (),
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-
     left_flex.end();
-    main_flex.add(&left_flex); // 将左侧 Flex 添加到主 Flex    // 右半部分
-    let mut right_flex = Flex::new(HALF_WIDTH, 0, HALF_WIDTH, WINDOW_HEIGHT, "");
+    
+    // 右半部分
+    let mut right_flex = Flex::new(HALF_WIDTH, 0, HALF_WIDTH, WINDOW_HEIGHT - 30, "");
     right_flex.set_type(fltk::group::FlexType::Column);
     right_flex.set_margin(5);
 
     let mut search_row_flex = Flex::new(0, 0, 0, 30, ""); // 高度固定，宽度由 right_flex 控制
-    search_row_flex.set_type(fltk::group::FlexType::Row);    let mut search_input = Input::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
+    search_row_flex.set_type(fltk::group::FlexType::Row);
+    let mut search_input = Input::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
     search_input.set_tooltip("输入番剧名称关键字");
     let mut search_button = Button::new(0, 0, 40, 0, "🔎"); // 宽度固定，高度由 Flex 控制
     search_row_flex.fixed(&search_button, 40); // 固定搜索按钮宽度
@@ -378,18 +356,108 @@ fn main() {
     search_results_browser.set_type(fltk::browser::BrowserType::Hold); // 单选模式
 
     right_flex.end();
-    main_flex.add(&right_flex); // 将右侧 Flex 添加到主 Flex
-
-    main_flex.end();
-    wind.add(&main_flex); // 将主 Flex 添加到窗口
-
-    wind.resizable(&main_flex); // 使主 Flex 可调整大小    wind.end();
+    
+    // 添加左右两侧布局到内容区域
+    content_flex.add(&left_flex);
+    content_flex.add(&right_flex);
+    content_flex.end();
+      // 添加底部显示路径的行
+    let mut bottom_flex = Flex::new(0, WINDOW_HEIGHT - 30, WINDOW_WIDTH, 30, "");
+    bottom_flex.set_type(fltk::group::FlexType::Row);
+      let mut base_path_display = Output::new(0, 0, 0, 0, "");
+    base_path_display.set_tooltip("源路径(B按钮)");
+    
+    let path_arrow = Frame::new(0, 0, 30, 0, "=>");
+    bottom_flex.fixed(&path_arrow, 30);
+    
+    let mut anime_path_display = Output::new(0, 0, 0, 0, "");
+    anime_path_display.set_tooltip("目标路径(A按钮)");
+    
+    bottom_flex.end();
+    
+    // 将内容和底部加入主布局
+    main_vertical_flex.add(&content_flex);
+    main_vertical_flex.add(&bottom_flex);
+    main_vertical_flex.fixed(&bottom_flex, 30);
+    main_vertical_flex.end();
+    
+    wind.add(&main_vertical_flex); // 将主 Flex 添加到窗口
+    wind.resizable(&main_vertical_flex); // 使主 Flex 可调整大小
+    wind.end();
     wind.show();
 
     // 创建共享数据结构
     let search_results: Rc<RefCell<Option<Bgm>>> = Rc::new(RefCell::new(None));
     let episode_list: Rc<RefCell<Option<Ep>>> = Rc::new(RefCell::new(None));
-    let selected_anime_id: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));    // 为搜索按钮设置回调
+    let selected_anime_id: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));    // 按钮B - 设置源路径并加载文件列表
+    {
+        let base_path_copy = base_path.clone();
+        let mut base_path_display_copy = base_path_display.clone();
+        let mut file_browser_clone = file_browser.clone();
+        
+        btn_choose_base.set_callback(move |_| {
+            let mut dialog = FileDialog::new(fltk::dialog::FileDialogType::BrowseDir);
+            dialog.show();
+            let chosen_path = dialog.filename();
+            if !chosen_path.as_os_str().is_empty() {
+                let path = Path::new(&chosen_path);
+                if path.is_dir() {
+                    // 保存源路径（B按钮）
+                    if let Some(path_str) = path.to_str() {
+                        *base_path_copy.borrow_mut() = Some(path_str.to_string());
+                        base_path_display_copy.set_value(path_str);
+                        
+                        // 直接从当前选择的路径加载文件到浏览器
+                        file_browser_clone.clear(); // 清空浏览器
+                        
+                        if let Ok(entries) = std::fs::read_dir(&path) {
+                            for entry in entries {
+                                if let Ok(entry) = entry {
+                                    let file_path = entry.path();
+                                    if file_path.is_file() {
+                                        if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
+                                            match ext.to_lowercase().as_str() {
+                                                "mp4" | "avi" | "mkv" | "mov" | "wmv" | "flv" | "webm" => {
+                                                    if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
+                                                        // 直接添加文件名
+                                                        file_browser_clone.add(file_name);
+                                                    }
+                                                }
+                                                _ => (),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+      // 按钮A - 设置目标路径
+    {
+        let anime_path_copy = anime_path.clone();
+        let mut anime_path_display_copy = anime_path_display.clone();
+        
+        btn_choose_anime.set_callback(move |_| {
+            let mut dialog = FileDialog::new(fltk::dialog::FileDialogType::BrowseDir);
+            dialog.show();
+            let chosen_path = dialog.filename();
+            if !chosen_path.as_os_str().is_empty() {
+                let path = Path::new(&chosen_path);
+                if path.is_dir() {
+                    // 保存目标路径（A按钮）
+                    if let Some(path_str) = path.to_str() {
+                        *anime_path_copy.borrow_mut() = Some(path_str.to_string());
+                        anime_path_display_copy.set_value(path_str);
+                    }
+                }
+            }
+        });
+    }
+    
+    // 为搜索按钮设置回调
     {
         let search_input_copy = search_input.clone();
         let search_results_copy = search_results.clone();
@@ -441,83 +509,310 @@ fn main() {
             }
             false // 让其他按键由默认处理程序处理
         });
-    }// 设置搜索结果双击事件处理
-    let search_results_copy = search_results.clone();
-    let episode_list_copy = episode_list.clone();
-    let selected_anime_id_copy = selected_anime_id.clone();
+    }
     
-    search_results_browser.set_callback(move |b| {
-        if app::event_clicks() {
-            let line = b.value();
-            if line > 0 && line <= b.size() {
-                if let Some(bgm) = &*search_results_copy.borrow() {
-                    let idx = (line as usize) - 1;
-                    if idx < bgm.id.len() {
-                        let anime_id = &bgm.id[idx];
-                        
-                        // 获取选中番剧的剧集信息
-                        let ep = Ep::get(anime_id);
-                        
-                        // 清空并显示剧集列表
-                        b.clear();
-                        for episode_name in &ep.name {
-                            b.add(episode_name);
+    // 设置搜索结果双击事件处理
+    {
+        let search_results_copy = search_results.clone();
+        let episode_list_copy = episode_list.clone();
+        let selected_anime_id_copy = selected_anime_id.clone();
+        
+        search_results_browser.set_callback(move |b| {
+            if app::event_clicks() {
+                let line = b.value();
+                if line > 0 && line <= b.size() {
+                    if let Some(bgm) = &*search_results_copy.borrow() {
+                        let idx = (line as usize) - 1;
+                        if idx < bgm.id.len() {
+                            let anime_id = &bgm.id[idx];
+                            
+                            // 获取选中番剧的剧集信息
+                            let ep = Ep::get(anime_id);
+                            
+                            // 清空并显示剧集列表
+                            b.clear();
+                            for episode_name in &ep.name {
+                                b.add(episode_name);
+                            }
+                            
+                            // 保存选中的番剧ID和剧集信息
+                            *selected_anime_id_copy.borrow_mut() = Some(anime_id.clone());
+                            *episode_list_copy.borrow_mut() = Some(ep);
                         }
-                        
-                        // 保存选中的番剧ID和剧集信息
-                        *selected_anime_id_copy.borrow_mut() = Some(anime_id.clone());
-                        *episode_list_copy.borrow_mut() = Some(ep);
                     }
                 }
             }
-        }
-    });
+        });
+    }    // 设置"完成"按钮回调
+    {        let mut file_browser_copy = file_browser.clone();
+        let episode_list_copy = episode_list.clone();
+        let base_path_copy = base_path.clone(); // 目标路径
+        let anime_path_copy = anime_path.clone(); // 源路径
+        let search_results_copy = search_results.clone();
+        let selected_anime_id_copy = selected_anime_id.clone();
+        let mut search_results_browser_copy = search_results_browser.clone();
+        let search_results_copy = search_results.clone();
+        let selected_anime_id_copy = selected_anime_id.clone();
+        let mut search_results_browser_copy = search_results_browser.clone();
+        
+        btn_done.set_callback(move |_| {
+            // 提示用户新增的字幕文件处理功能
+            println!("注意: 该程序会自动查找并处理与视频文件对应的字幕文件，保留原有语言标识");
+            println!("      支持的字幕格式: .ass, .srt, .ssa, .sub");
+            
+            // 首先检查源路径和目标路径是否都已设置
+            if base_path_copy.borrow().is_none() {
+                println!("错误: 未设置源文件路径（B按钮）");
+                fltk::dialog::message_default("错误: 未设置源文件路径（B按钮）");
+                return;
+            }
+            
+            if anime_path_copy.borrow().is_none() {
+                println!("错误: 未设置目标位置路径（A按钮）");
+                fltk::dialog::message_default("错误: 未设置目标位置路径（A按钮）");
+                return;
+            }
+            
+            let base_path_str = base_path_copy.borrow().as_ref().unwrap().clone(); // 源路径（B按钮选择）
+            let anime_path_str = anime_path_copy.borrow().as_ref().unwrap().clone(); // 目标路径（A按钮选择）
+            
+            // 获取文件浏览器中的文件列表（从第1行开始，不再有头部行）
+            let mut file_names = Vec::new();
+            for i in 1..=file_browser_copy.size() {
+                if let Some(text) = file_browser_copy.text(i) {
+                    // 直接使用文本，不再需要去除前缀
+                    file_names.push(text.to_string());
+                }
+            }
+            
+            // 获取剧集列表
+            if let Some(ep) = &*episode_list_copy.borrow() {
+                // 创建文件名与剧集对应的列表
+                let mut matched_pairs = Vec::new();
+                
+                // 打印匹配结果
+                println!("文件与剧集匹配结果:");
+                
+                let mut matched_count = 0;
+                for (i, file_name) in file_names.iter().enumerate() {
+                    if i < ep.name.len() {
+                        // 获取源文件的扩展名
+                        let src_path = Path::new(&base_path_str).join(file_name);
+                        let extension = src_path.extension()
+                            .and_then(|ext| ext.to_str())
+                            .unwrap_or("");
+                        
+                        // 构建带扩展名的目标文件名用于显示
+                        let dst_name_with_ext = if extension.is_empty() {
+                            ep.name[i].clone()
+                        } else {
+                            format!("{}.{}", ep.name[i], extension)
+                        };
+                        
+                        println!("{} -> {}", file_name, dst_name_with_ext);
+                        matched_pairs.push((file_name.clone(), ep.name[i].clone()));
+                        matched_count += 1;
+                    }
+                }
+                
+                println!("成功匹配: {}/{} 个文件", matched_count, file_names.len());
+                
+                if matched_count < file_names.len() {
+                    println!("警告: 有 {} 个文件没有对应的剧集信息", 
+                        file_names.len() - matched_count);
+                }
+                  // 执行硬链接操作
+                if !matched_pairs.is_empty() {
+                    // 确保目标目录存在
+                    let dest_path = Path::new(&anime_path_str); // A按钮设置的目标路径
+                    if !dest_path.exists() {
+                        if let Err(e) = std::fs::create_dir_all(dest_path) {
+                            println!("创建目标目录失败: {}", e);
+                            fltk::dialog::message_default(&format!("创建目标目录失败: {}", e));
+                            return;
+                        }
+                    }
+                    
+                    // 查找可能存在的字幕文件
+                    let mut subtitle_files = Vec::new();
+                    if let Ok(entries) = std::fs::read_dir(&base_path_str) {
+                        for entry in entries.filter_map(Result::ok) {
+                            let path = entry.path();
+                            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                                // 检查是否是字幕文件（通常以.ass、.srt等结尾）
+                                let is_subtitle = path.extension()
+                                    .and_then(|ext| ext.to_str())
+                                    .map(|ext| ext.to_lowercase())
+                                    .map(|ext| ext == "ass" || ext == "srt" || ext == "ssa" || ext == "sub")
+                                    .unwrap_or(false);
+                                
+                                if is_subtitle {
+                                    // 添加到字幕列表
+                                    subtitle_files.push(file_name.to_string());
+                                }
+                            }
+                        }
+                    }
+                    
+                    println!("找到 {} 个字幕文件", subtitle_files.len());
+                    if !subtitle_files.is_empty() {
+                        println!("字幕文件列表:");
+                        for sub_file in &subtitle_files {
+                            println!("  - {}", sub_file);
+                        }
+                    }
+                    
+                    // 创建硬链接
+                    let mut success_count = 0;
+                    let mut subtitle_count = 0;
+                    
+                    for (src_file, dst_name) in &matched_pairs {
+                        let src_path = Path::new(&base_path_str).join(src_file); // B按钮设置的源路径
+                        
+                        // 从源文件路径获取文件扩展名
+                        let extension = src_path.extension()
+                            .and_then(|ext| ext.to_str())
+                            .unwrap_or("");
+                        
+                        // 构建包含扩展名的目标文件名
+                        let dst_name_with_ext = if extension.is_empty() {
+                            dst_name.clone()
+                        } else {
+                            format!("{}.{}", dst_name, extension)
+                        };
+                        
+                        let dst_path = Path::new(&anime_path_str).join(&dst_name_with_ext); // A按钮设置的目标路径
+                        
+                        // 检查源文件是否存在
+                        if !src_path.exists() {
+                            println!("源文件不存在: {:?}", src_path);
+                            continue;
+                        }
+                        
+                        // 如果目标文件已存在，先删除
+                        if dst_path.exists() {
+                            if let Err(e) = std::fs::remove_file(&dst_path) {
+                                println!("删除已存在的目标文件失败: {}", e);
+                                continue;
+                            }
+                        }
+                        
+                        // 创建硬链接                        println!("创建硬链接: {:?} -> {:?}", src_path, dst_path);
+                        if let Err(e) = std::fs::hard_link(&src_path, &dst_path) {
+                            println!("创建硬链接失败: {}", e);
+                        } else {
+                            println!("硬链接创建成功");
+                            success_count += 1;
+                              // 处理对应的字幕文件
+                            if let Some(src_stem) = src_path.file_stem().and_then(|s| s.to_str()) {
+                                // 查找所有与该视频文件匹配的字幕文件
+                                for subtitle_file in &subtitle_files {
+                                    // 检查字幕文件是否属于当前视频文件
+                                    // 格式可能是: 视频名.语言标识.ass 或 视频名.ass
+                                    // Normalize by removing spaces and converting to lowercase for robust matching
+                                    let normalized_src_stem = src_stem.replace(" ", "").to_lowercase();
+                                    let normalized_subtitle_file = subtitle_file.replace(" ", "").to_lowercase();
 
-    // 设置"完成"按钮回调
-    let file_browser_copy = file_browser.clone();
-    let episode_list_copy = episode_list.clone();
-      btn_done.set_callback(move |_| {
-        // 获取文件浏览器中的文件列表（从第2行开始）
-        let mut file_names = Vec::new();
-        for i in 2..=file_browser_copy.size() {
-            if let Some(text) = file_browser_copy.text(i) {
-                if text.starts_with("├───") {
-                    // 使用字符级别的操作而不是字节级别的索引
-                    // 跳过前5个字符而不是字节
-                    file_names.push(text.chars().skip(5).collect::<String>()); // 去除前缀 "├─── "
+                                    let mut is_match = false;
+                                    if normalized_subtitle_file.starts_with(&normalized_src_stem) {
+                                        // Ensure that what follows the normalized_src_stem in normalized_subtitle_file
+                                        // starts with a dot, indicating an extension or language tag.
+                                        if normalized_src_stem.len() < normalized_subtitle_file.len() {
+                                            let remainder = &normalized_subtitle_file[normalized_src_stem.len()..];
+                                            if remainder.starts_with('.') {
+                                                // The original `is_subtitle` check (when populating `subtitle_files`)
+                                                // already ensures it ends with a valid subtitle extension.
+                                                is_match = true;
+                                            }
+                                        } else if normalized_src_stem.len() == normalized_subtitle_file.len() {
+                                            // This case should not happen if subtitle_file always has an extension
+                                            // and was filtered by is_subtitle. But as a safe guard,
+                                            // if they are identical after normalization, it implies video stem was
+                                            // somehow identical to a subtitle file name without its final extension.
+                                            // This is unlikely to be a valid subtitle match unless src_stem itself
+                                            // ended with something like ".ass_stem" and subtitle was ".ass_stem.real_ext".
+                                            // Given `is_subtitle` filters for actual subtitle extensions, this path is less critical.
+                                        }
+                                    }
+                                    
+                                    println!("检查字幕文件 '{}' 与视频 '{}' (stem: '{}') 是否匹配: {}", 
+                                              subtitle_file, src_file, src_stem, if is_match { "是" } else { "否" });
+                                    
+                                    if is_match {
+                                        let subtitle_path = Path::new(&base_path_str).join(subtitle_file);
+                                          let subtitle_ext = subtitle_path.extension()
+                                            .and_then(|ext| ext.to_str())
+                                            .unwrap_or("ass"); // Default to "ass" if no extension found
+
+                                        let original_subtitle_stem = subtitle_path.file_stem()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or("");
+
+                                        // src_stem is from the video file (e.g., "Video.Name.Tag")
+                                        // dst_name is the new episode base name (e.g., "EP01 - Title")
+
+                                        let mut lang_and_middle_parts = "";
+                                        // Compare original_subtitle_stem with src_stem (video stem)
+                                        // to find parts like ".eng", ".chi.sim"
+                                        if original_subtitle_stem.starts_with(src_stem) {
+                                            let remainder = original_subtitle_stem.strip_prefix(src_stem).unwrap_or("");
+                                            if remainder.starts_with('.') && !remainder.is_empty() {
+                                                lang_and_middle_parts = remainder; // e.g., ".eng", ".chi.sim"
+                                            }
+                                        }
+                                        
+                                        // Construct the new subtitle name: dst_name + lang_parts + subtitle_extension
+                                        let new_subtitle_name = format!("{}{}.{}",
+                                            dst_name,              // New episode base name like "EP01 - Title"
+                                            lang_and_middle_parts, // Language identifier like ".eng", or empty string
+                                            subtitle_ext);         // Subtitle extension like "srt"
+                                        
+                                        println!("  源字幕stem: {}, 视频stem: {}, 语言部分: '{}', 新字幕名: {}", original_subtitle_stem, src_stem, lang_and_middle_parts, new_subtitle_name);
+                                        
+                                        let new_subtitle_path = Path::new(&anime_path_str).join(&new_subtitle_name);
+                                        
+                                        // 如果目标字幕文件已存在，先删除
+                                        if new_subtitle_path.exists() {
+                                            if let Err(e) = std::fs::remove_file(&new_subtitle_path) {
+                                                println!("删除已存在的目标字幕文件失败: {}", e);
+                                                continue;
+                                            }
+                                        }
+                                        
+                                        // 创建字幕文件的硬链接
+                                        println!("创建字幕硬链接: {:?} -> {:?}", subtitle_path, new_subtitle_path);
+                                        if let Err(e) = std::fs::hard_link(&subtitle_path, &new_subtitle_path) {
+                                            println!("创建字幕硬链接失败: {}", e);
+                                        } else {
+                                            println!("字幕硬链接创建成功");
+                                            subtitle_count += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                      let message = format!("成功创建 {}/{} 个视频硬链接，{} 个字幕硬链接", 
+                        success_count, matched_pairs.len(), subtitle_count);
+                    println!("{}", message);
+                    fltk::dialog::message_default(&message);
+                    
+                    // 操作完成后清空文件浏览器和搜索结果列表
+                    file_browser_copy.clear();
+                    search_results_browser_copy.clear();
+                    // 清空关联的内存数据
+                    *episode_list_copy.borrow_mut() = None;
+                    *search_results_copy.borrow_mut() = None;
+                    *selected_anime_id_copy.borrow_mut() = None;
+                    
+                    println!("已清空文件浏览器和搜索结果列表，可以开始下一次操作");
                 }
+            } else {
+                println!("错误: 未选择任何番剧或未获取到剧集信息");
+                fltk::dialog::message_default("错误: 未选择任何番剧或未获取到剧集信息");
             }
-        }
-          // 获取剧集列表
-        if let Some(ep) = &*episode_list_copy.borrow() {
-            // 创建文件名与剧集对应的列表
-            let mut matched_pairs = Vec::new();
-            
-            // 打印匹配结果
-            println!("文件与剧集匹配结果:");
-            
-            let mut matched_count = 0;
-            for (i, file_name) in file_names.iter().enumerate() {
-                if i < ep.name.len() {
-                    println!("{} -> {}", file_name, ep.name[i]);
-                    matched_pairs.push((file_name.clone(), ep.name[i].clone()));
-                    matched_count += 1;
-                }
-            }
-            
-            println!("成功匹配: {}/{} 个文件", matched_count, file_names.len());
-            
-            if matched_count < file_names.len() {
-                println!("警告: 有 {} 个文件没有对应的剧集信息", 
-                    file_names.len() - matched_count);
-            }
-            
-            // 这里可以将matched_pairs传递给其他函数进行进一步处理
-            println!("总共匹配了 {} 个文件与剧集对", matched_pairs.len());
-        } else {
-            println!("错误: 未选择任何番剧或未获取到剧集信息");
-        }
-    });
+        });
+    }
 
     app.run().unwrap();
 }
