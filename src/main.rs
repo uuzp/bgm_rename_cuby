@@ -172,6 +172,18 @@ fn main() {
     // 添加两个路径变量
     let base_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let anime_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+
+    // --- 提前定义按钮，以便在不同 Flex 容器中使用 ---
+    let mut btn_choose_base = Button::new(0, 0, 0, 0, "选择源路径 (B)");
+    btn_choose_base.set_tooltip("选择源文件夹 (B)");
+    let mut btn_choose_anime = Button::new(0, 0, 0, 0, "选择目标路径 (A)");
+    btn_choose_anime.set_tooltip("选择目标文件夹 (A)");
+    let mut btn_done = Button::new(0, 0, 0, 0, "完成");
+
+    // --- 新增：提前定义搜索控件 ---
+    let mut search_input = Input::new(0, 0, 0, 0, "");
+    search_input.set_tooltip("输入番剧名称关键字");
+    let mut search_button = Button::new(0, 0, 40, 0, "🔎");
     
     let mut main_vertical_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
     main_vertical_flex.set_type(fltk::group::FlexType::Column); // 垂直排列
@@ -196,8 +208,17 @@ fn main() {
     top_triggers_flex.add(&path_trigger_button);
     top_triggers_flex.fixed(&path_trigger_button, 80);
     
-    let spacer = Frame::new(0,0,0,0,""); // 添加一个间隔，使按钮靠左 (removed mut)
-    top_triggers_flex.add(&spacer);
+    top_triggers_flex.add(&btn_done); // 将“完成”按钮添加到顶部触发器行
+    top_triggers_flex.fixed(&btn_done, 80); // 给“完成”按钮一个宽度
+
+    let top_spacer = Frame::new(0,0,0,0,""); // 添加一个间隔，用于将搜索控件推到右侧
+    top_triggers_flex.add(&top_spacer);
+
+    // 将搜索框和搜索按钮添加到 top_triggers_flex
+    top_triggers_flex.add(&search_input); // search_input 会自动填充剩余空间
+    top_triggers_flex.add(&search_button);
+    top_triggers_flex.fixed(&search_button, 40); // 搜索按钮固定宽度
+    
     top_triggers_flex.end();
     
     main_vertical_flex.add(&top_triggers_flex);
@@ -219,21 +240,20 @@ fn main() {
 
     // --- 新增：定义路径显示相关的控件 ---
     // 这些控件之前在 bottom_flex 中定义，现在移到这里，以便添加到新的可折叠面板中
-    let mut base_path_display = Output::new(0, 0, 0, 0, "");
-    base_path_display.set_tooltip("源路径(B按钮)");
-    
-    let path_arrow = Frame::new(0, 0, 30, 0, "=>");
-    
-    let mut anime_path_display = Output::new(0, 0, 0, 0, "");
-    anime_path_display.set_tooltip("目标路径(A按钮)");
+    // 移除 base_path_display, path_arrow, anime_path_display
+    // let mut base_path_display = Output::new(0, 0, 0, 0, "");
+    // base_path_display.set_tooltip("源路径(B按钮)");
+    // let path_arrow = Frame::new(0, 0, 30, 0, "=>");
+    // let mut anime_path_display = Output::new(0, 0, 0, 0, "");
+    // anime_path_display.set_tooltip("目标路径(A按钮)");
 
-    // --- 新增：可展开的路径显示面板 ---
+    // --- 新增：可展开的路径显示面板 (现在包含路径选择按钮) ---
     let mut path_display_panel_flex = Flex::new(0, 0, WINDOW_WIDTH, 0, ""); // 初始高度为0
     path_display_panel_flex.set_type(fltk::group::FlexType::Row);
-    path_display_panel_flex.add(&base_path_display);
-    path_display_panel_flex.add(&path_arrow);
-    path_display_panel_flex.fixed(&path_arrow, 30);
-    path_display_panel_flex.add(&anime_path_display);
+    path_display_panel_flex.set_margin(2); // 添加一些边距
+    path_display_panel_flex.add(&btn_choose_base); // 添加B按钮
+    path_display_panel_flex.add(&btn_choose_anime); // 添加A按钮
+    // 按钮将自动拉伸以填充空间
     path_display_panel_flex.end();
     path_display_panel_flex.hide(); // 初始隐藏
     main_vertical_flex.add(&path_display_panel_flex);
@@ -251,13 +271,14 @@ fn main() {
     left_flex.set_type(fltk::group::FlexType::Column); 
     left_flex.set_margin(5); 
     
-    let mut button_row_flex = Flex::new(0, 0, 0, 30, ""); 
-    button_row_flex.set_type(fltk::group::FlexType::Row);
-    let mut btn_choose_base = Button::new(0, 0, 0, 0, "B"); 
-    let mut btn_choose_anime = Button::new(0, 0, 0, 0, "A"); 
-    let mut btn_done = Button::new(0, 0, 0, 0, "完成"); 
-    button_row_flex.end();
-    left_flex.fixed(&button_row_flex, 30); 
+    // 移除旧的 button_row_flex
+    // let mut button_row_flex = Flex::new(0, 0, 0, 30, ""); 
+    // button_row_flex.set_type(fltk::group::FlexType::Row);
+    // let mut btn_choose_base = Button::new(0, 0, 0, 0, "B"); 
+    // let mut btn_choose_anime = Button::new(0, 0, 0, 0, "A"); 
+    // let mut btn_done = Button::new(0, 0, 0, 0, "完成"); 
+    // button_row_flex.end();
+    // left_flex.fixed(&button_row_flex, 30); 
 
     // 文件浏览器将填充 left_flex 的剩余空间
     let mut file_browser = FileBrowser::new(0, 0, 0, 0, ""); 
@@ -333,6 +354,7 @@ fn main() {
                                 b.select(current_line);
                             }
                             
+
                             // 清除标记
                             *marked_idx = None;
                         } else {
@@ -420,14 +442,15 @@ fn main() {
     right_flex.set_type(fltk::group::FlexType::Column);
     right_flex.set_margin(5);
 
-    let mut search_row_flex = Flex::new(0, 0, 0, 30, ""); 
-    search_row_flex.set_type(fltk::group::FlexType::Row);
-    let mut search_input = Input::new(0, 0, 0, 0, ""); 
-    search_input.set_tooltip("输入番剧名称关键字");
-    let mut search_button = Button::new(0, 0, 40, 0, "🔎"); 
-    search_row_flex.fixed(&search_button, 40); 
-    search_row_flex.end();
-    right_flex.fixed(&search_row_flex, 30); 
+    // --- 移除旧的 search_row_flex ---
+    // let mut search_row_flex = Flex::new(0, 0, 0, 30, ""); 
+    // search_row_flex.set_type(fltk::group::FlexType::Row);
+    // let mut search_input = Input::new(0, 0, 0, 0, ""); // 定义已上移
+    // search_input.set_tooltip("输入番剧名称关键字"); // 已上移
+    // let mut search_button = Button::new(0, 0, 40, 0, "🔎"); // 定义已上移
+    // search_row_flex.fixed(&search_button, 40); 
+    // search_row_flex.end();
+    // right_flex.fixed(&search_row_flex, 30); 
 
     // 搜索结果浏览器将填充 right_flex 的剩余空间
     let mut search_results_browser = MultiBrowser::new(0, 0, 0, 0, ""); 
@@ -513,7 +536,9 @@ fn main() {
     let selected_anime_id: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));    // 按钮B - 设置源路径并加载文件列表
     {
         let base_path_copy = base_path.clone();
-        let mut base_path_display_copy = base_path_display.clone();
+        // 移除 base_path_display_copy，改为更新按钮标签
+        // let mut base_path_display_copy = base_path_display.clone();
+        let mut btn_choose_base_clone = btn_choose_base.clone(); // 克隆按钮B
         let mut file_browser_clone = file_browser.clone();
         
         btn_choose_base.set_callback(move |_| {
@@ -526,7 +551,8 @@ fn main() {
                     // 保存源路径（B按钮）
                     if let Some(path_str) = path.to_str() {
                         *base_path_copy.borrow_mut() = Some(path_str.to_string());
-                        base_path_display_copy.set_value(path_str);
+                        // base_path_display_copy.set_value(path_str);
+                        btn_choose_base_clone.set_label(path_str); // 更新按钮B的标签
                         
                         // 直接从当前选择的路径加载文件到浏览器
                         file_browser_clone.clear(); // 清空浏览器
@@ -559,7 +585,9 @@ fn main() {
       // 按钮A - 设置目标路径
     {
         let anime_path_copy = anime_path.clone();
-        let mut anime_path_display_copy = anime_path_display.clone();
+        // 移除 anime_path_display_copy，改为更新按钮标签
+        // let mut anime_path_display_copy = anime_path_display.clone();
+        let mut btn_choose_anime_clone = btn_choose_anime.clone(); // 克隆按钮A
         
         btn_choose_anime.set_callback(move |_| {
             let mut dialog = FileDialog::new(fltk::dialog::FileDialogType::BrowseDir);
@@ -571,7 +599,8 @@ fn main() {
                     // 保存目标路径（A按钮）
                     if let Some(path_str) = path.to_str() {
                         *anime_path_copy.borrow_mut() = Some(path_str.to_string());
-                        anime_path_display_copy.set_value(path_str);
+                        // anime_path_display_copy.set_value(path_str);
+                        btn_choose_anime_clone.set_label(path_str); // 更新按钮A的标签
                     }
                 }
             }

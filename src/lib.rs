@@ -199,7 +199,7 @@ pub fn get_out_file_paths(path:PathBuf,v_names:Vec<String>) -> Vec<PathBuf> {
     }).collect()
 
 }
-pub fn out_ep_path(p:PathBuf,v:Vec<(String,String)>,a:&str) -> (Vec<Ep>,Vec<PathBuf>) {
+pub fn out_ep_path(p:PathBuf,v:Vec<(String,String)>) -> (Vec<Ep>,Vec<PathBuf>) {
     let ep:Vec<Ep> =  v.iter().map(|(x,_y)| {
          Ep::get(&x) // 移除 a 参数
      }).collect();
