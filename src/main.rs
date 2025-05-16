@@ -1,19 +1,25 @@
+// filepath: a:\Dev\PJ\bgm_rename_cuby\src\main.rs
 use fltk::{
     app,
     browser::{FileBrowser, MultiBrowser},
     button::Button,
-    dialog::FileDialog,
-    enums::{Event, Color},
+    dialog::FileDialog, // Removed message_default as it's directly used via fltk::dialog::message_default
+    enums::{Color, Event}, // Removed Key as it's not used in the provided snippet
+    frame::Frame,
     group::Flex,
     input::Input,
     output::Output,
-    frame::Frame,
     prelude::*,
     window::Window,
 };
-use std::cell::RefCell;
-use std::path::Path;
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    path::Path, // Removed PathBuf as it's not used
+    rc::Rc,
+    // fs, // Removed fs as it's not directly used in the provided snippet, assuming it's used elsewhere or implicitly
+    // io, // Removed io for the same reason as fs
+};
+
 use miniserde::{Deserialize, Serialize};
 use miniserde::json;
 use minreq;
@@ -169,22 +175,92 @@ fn main() {
     
     let mut main_vertical_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
     main_vertical_flex.set_type(fltk::group::FlexType::Column); // 垂直排列
+
+    // --- 修改：菜单栏 & 路径栏 UI Elements ---
+    const MENU_TRIGGER_HEIGHT: i32 = 30;
+    const MENU_ITEMS_PANEL_EXPANDED_HEIGHT: i32 = 60; // 2 buttons * 30 height each
+    const PATH_DISPLAY_PANEL_EXPANDED_HEIGHT: i32 = 30; // Original height of bottom_flex
+
+    let is_menu_expanded = Rc::new(RefCell::new(false));
+    let is_path_panel_expanded = Rc::new(RefCell::new(false)); // 新增状态
+
+    // 顶部触发器行 (包含菜单按钮和路径按钮)
+    let mut top_triggers_flex = Flex::new(0, 0, WINDOW_WIDTH, MENU_TRIGGER_HEIGHT, "");
+    top_triggers_flex.set_type(fltk::group::FlexType::Row);
+
+    let mut menu_trigger_button = Button::new(0, 0, 80, 0, "菜单 ☰"); // 定义菜单按钮
+    top_triggers_flex.add(&menu_trigger_button);
+    top_triggers_flex.fixed(&menu_trigger_button, 80);
+
+    let mut path_trigger_button = Button::new(0, 0, 80, 0, "路径 🗀"); // 新增路径按钮
+    top_triggers_flex.add(&path_trigger_button);
+    top_triggers_flex.fixed(&path_trigger_button, 80);
+    
+    let spacer = Frame::new(0,0,0,0,""); // 添加一个间隔，使按钮靠左 (removed mut)
+    top_triggers_flex.add(&spacer);
+    top_triggers_flex.end();
+    
+    main_vertical_flex.add(&top_triggers_flex);
+    main_vertical_flex.fixed(&top_triggers_flex, MENU_TRIGGER_HEIGHT);
+
+    // 可展开的菜单项面板 ("设置", "关于")
+    let mut menu_items_panel_flex = Flex::new(0, 0, WINDOW_WIDTH, 0, ""); // 初始高度为0
+    menu_items_panel_flex.set_type(fltk::group::FlexType::Column);
+    menu_items_panel_flex.set_margin(2); 
+
+    let mut settings_button = Button::new(0, 0, 0, 30, "设置"); 
+    let mut about_button = Button::new(0, 0, 0, 30, "关于");    
+
+    menu_items_panel_flex.add(&settings_button);
+    menu_items_panel_flex.add(&about_button);
+    menu_items_panel_flex.end();
+    menu_items_panel_flex.hide(); 
+    main_vertical_flex.add(&menu_items_panel_flex);
+
+    // --- 新增：定义路径显示相关的控件 ---
+    // 这些控件之前在 bottom_flex 中定义，现在移到这里，以便添加到新的可折叠面板中
+    let mut base_path_display = Output::new(0, 0, 0, 0, "");
+    base_path_display.set_tooltip("源路径(B按钮)");
+    
+    let path_arrow = Frame::new(0, 0, 30, 0, "=>");
+    
+    let mut anime_path_display = Output::new(0, 0, 0, 0, "");
+    anime_path_display.set_tooltip("目标路径(A按钮)");
+
+    // --- 新增：可展开的路径显示面板 ---
+    let mut path_display_panel_flex = Flex::new(0, 0, WINDOW_WIDTH, 0, ""); // 初始高度为0
+    path_display_panel_flex.set_type(fltk::group::FlexType::Row);
+    path_display_panel_flex.add(&base_path_display);
+    path_display_panel_flex.add(&path_arrow);
+    path_display_panel_flex.fixed(&path_arrow, 30);
+    path_display_panel_flex.add(&anime_path_display);
+    path_display_panel_flex.end();
+    path_display_panel_flex.hide(); // 初始隐藏
+    main_vertical_flex.add(&path_display_panel_flex);
+    
+    // --- 菜单栏相关定义结束 ---
     
     // 创建内容区域的水平布局
-    let mut content_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 30, "");
-    content_flex.set_type(fltk::group::FlexType::Row);    // 左半部分
-    let mut left_flex = Flex::new(0, 0, HALF_WIDTH, WINDOW_HEIGHT - 30, "");    left_flex.set_type(fltk::group::FlexType::Column); // 垂直排列
-    left_flex.set_margin(5); // 添加一些边距
+    // 高度将由 main_vertical_flex 在菜单栏、路径栏和底部栏之间自动分配
+    let mut content_flex = Flex::new(0, 0, WINDOW_WIDTH, 0, ""); 
+    content_flex.set_type(fltk::group::FlexType::Row);
     
-    let mut button_row_flex = Flex::new(0, 0, 0, 30, ""); // 高度固定，宽度由 left_flex 控制
+    // 左半部分
+    // 高度将由 content_flex 自动分配
+    let mut left_flex = Flex::new(0, 0, HALF_WIDTH, 0, "");    
+    left_flex.set_type(fltk::group::FlexType::Column); 
+    left_flex.set_margin(5); 
+    
+    let mut button_row_flex = Flex::new(0, 0, 0, 30, ""); 
     button_row_flex.set_type(fltk::group::FlexType::Row);
-    let mut btn_choose_base = Button::new(0, 0, 0, 0, "B"); // 按钮B - 设置源路径（显示文件列表）
-    let mut btn_choose_anime = Button::new(0, 0, 0, 0, "A"); // 按钮A - 设置目标路径
-    let mut btn_done = Button::new(0, 0, 0, 0, "完成"); // 大小由 Flex 控制
+    let mut btn_choose_base = Button::new(0, 0, 0, 0, "B"); 
+    let mut btn_choose_anime = Button::new(0, 0, 0, 0, "A"); 
+    let mut btn_done = Button::new(0, 0, 0, 0, "完成"); 
     button_row_flex.end();
-    left_flex.fixed(&button_row_flex, 30); // 固定按钮行的高度
+    left_flex.fixed(&button_row_flex, 30); 
 
-    let mut file_browser = FileBrowser::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
+    // 文件浏览器将填充 left_flex 的剩余空间
+    let mut file_browser = FileBrowser::new(0, 0, 0, 0, ""); 
     file_browser.set_selection_color(Color::Yellow);
     file_browser.set_type(fltk::browser::BrowserType::Hold); // 单选模式
     file_browser.set_damage(true); // Ensure redraws    // For drag-and-drop reordering
@@ -264,6 +340,7 @@ fn main() {
                             *marked_idx = Some(current_line);
                             println!("标记第 {} 行", current_line);
                             
+
                             // 高亮当前行以提供视觉反馈
                             b.select(current_line);
                         }
@@ -338,53 +415,97 @@ fn main() {
     left_flex.end();
     
     // 右半部分
-    let mut right_flex = Flex::new(HALF_WIDTH, 0, HALF_WIDTH, WINDOW_HEIGHT - 30, "");
+    // 高度将由 content_flex 自动分配
+    let mut right_flex = Flex::new(HALF_WIDTH, 0, HALF_WIDTH, 0, "");
     right_flex.set_type(fltk::group::FlexType::Column);
     right_flex.set_margin(5);
 
-    let mut search_row_flex = Flex::new(0, 0, 0, 30, ""); // 高度固定，宽度由 right_flex 控制
+    let mut search_row_flex = Flex::new(0, 0, 0, 30, ""); 
     search_row_flex.set_type(fltk::group::FlexType::Row);
-    let mut search_input = Input::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
+    let mut search_input = Input::new(0, 0, 0, 0, ""); 
     search_input.set_tooltip("输入番剧名称关键字");
-    let mut search_button = Button::new(0, 0, 40, 0, "🔎"); // 宽度固定，高度由 Flex 控制
-    search_row_flex.fixed(&search_button, 40); // 固定搜索按钮宽度
+    let mut search_button = Button::new(0, 0, 40, 0, "🔎"); 
+    search_row_flex.fixed(&search_button, 40); 
     search_row_flex.end();
-    right_flex.fixed(&search_row_flex, 30); // 固定搜索行高度
+    right_flex.fixed(&search_row_flex, 30); 
 
-    let mut search_results_browser = MultiBrowser::new(0, 0, 0, 0, ""); // 大小由 Flex 控制
+    // 搜索结果浏览器将填充 right_flex 的剩余空间
+    let mut search_results_browser = MultiBrowser::new(0, 0, 0, 0, ""); 
     search_results_browser.set_selection_color(Color::Yellow);
     search_results_browser.set_type(fltk::browser::BrowserType::Hold); // 单选模式
 
     right_flex.end();
     
-    // 添加左右两侧布局到内容区域
     content_flex.add(&left_flex);
     content_flex.add(&right_flex);
     content_flex.end();
-      // 添加底部显示路径的行
-    let mut bottom_flex = Flex::new(0, WINDOW_HEIGHT - 30, WINDOW_WIDTH, 30, "");
-    bottom_flex.set_type(fltk::group::FlexType::Row);
-      let mut base_path_display = Output::new(0, 0, 0, 0, "");
-    base_path_display.set_tooltip("源路径(B按钮)");
+      
+    // 移除原有的 bottom_flex 定义，其内容已移至 path_display_panel_flex
+    // let mut bottom_flex = Flex::new(0, 0, WINDOW_WIDTH, 30, "");
+    // ... (base_path_display, path_arrow, anime_path_display were here)
+    // bottom_flex.end();
     
-    let path_arrow = Frame::new(0, 0, 30, 0, "=>");
-    bottom_flex.fixed(&path_arrow, 30);
-    
-    let mut anime_path_display = Output::new(0, 0, 0, 0, "");
-    anime_path_display.set_tooltip("目标路径(A按钮)");
-    
-    bottom_flex.end();
-    
-    // 将内容和底部加入主布局
-    main_vertical_flex.add(&content_flex);
-    main_vertical_flex.add(&bottom_flex);
-    main_vertical_flex.fixed(&bottom_flex, 30);
+    // 将内容区域加入主布局
+    main_vertical_flex.add(&content_flex); // content_flex 会占据菜单栏和底部栏之间的剩余空间
+    // 移除 main_vertical_flex.add(&bottom_flex);
+    // 移除 main_vertical_flex.fixed(&bottom_flex, 30);
     main_vertical_flex.end();
     
-    wind.add(&main_vertical_flex); // 将主 Flex 添加到窗口
-    wind.resizable(&main_vertical_flex); // 使主 Flex 可调整大小
+    wind.add(&main_vertical_flex); 
+    wind.resizable(&main_vertical_flex); 
     wind.end();
     wind.show();
+
+    // --- 修改：菜单栏按钮回调 ---
+    let mut menu_items_panel_flex_clone_cb = menu_items_panel_flex.clone();
+    let mut main_vertical_flex_cb_clone_menu = main_vertical_flex.clone(); 
+    let is_menu_expanded_clone = is_menu_expanded.clone(); // 为回调克隆状态
+    let mut wind_clone_for_menu = wind.clone(); // 克隆 wind 用于菜单回调
+
+    menu_trigger_button.set_callback(move |_| {
+        let mut expanded = is_menu_expanded_clone.borrow_mut(); 
+        *expanded = !*expanded;
+
+        if *expanded {
+            main_vertical_flex_cb_clone_menu.fixed(&menu_items_panel_flex_clone_cb, MENU_ITEMS_PANEL_EXPANDED_HEIGHT);
+            menu_items_panel_flex_clone_cb.show();
+        } else {
+            menu_items_panel_flex_clone_cb.hide(); 
+            main_vertical_flex_cb_clone_menu.fixed(&menu_items_panel_flex_clone_cb, 0);
+        }
+        main_vertical_flex_cb_clone_menu.layout(); 
+        wind_clone_for_menu.redraw(); // 使用克隆的 wind
+    });
+
+    settings_button.set_callback(|_| {
+        fltk::dialog::message_default("设置");
+    });
+
+    about_button.set_callback(|_| {
+        fltk::dialog::message_default("关于");
+    });
+    
+    // --- 新增：路径触发按钮回调 ---
+    let mut path_display_panel_flex_clone_cb = path_display_panel_flex.clone();
+    let mut main_vertical_flex_cb_clone_path = main_vertical_flex.clone();
+    let is_path_panel_expanded_clone = is_path_panel_expanded.clone(); // 为回调克隆状态
+    let mut wind_clone_for_path = wind.clone(); // 克隆 wind 用于路径回调
+
+    path_trigger_button.set_callback(move |_| {
+        let mut expanded = is_path_panel_expanded_clone.borrow_mut(); 
+        *expanded = !*expanded;
+
+        if *expanded {
+            main_vertical_flex_cb_clone_path.fixed(&path_display_panel_flex_clone_cb, PATH_DISPLAY_PANEL_EXPANDED_HEIGHT);
+            path_display_panel_flex_clone_cb.show();
+        } else {
+            path_display_panel_flex_clone_cb.hide();
+            main_vertical_flex_cb_clone_path.fixed(&path_display_panel_flex_clone_cb, 0);
+        }
+        main_vertical_flex_cb_clone_path.layout();
+        wind_clone_for_path.redraw(); // 使用克隆的 wind
+    });
+    // --- 菜单栏按钮回调结束 ---
 
     // 创建共享数据结构
     let search_results: Rc<RefCell<Option<Bgm>>> = Rc::new(RefCell::new(None));
@@ -548,9 +669,6 @@ fn main() {
         let episode_list_copy = episode_list.clone();
         let base_path_copy = base_path.clone(); // 目标路径
         let anime_path_copy = anime_path.clone(); // 源路径
-        let search_results_copy = search_results.clone();
-        let selected_anime_id_copy = selected_anime_id.clone();
-        let mut search_results_browser_copy = search_results_browser.clone();
         let search_results_copy = search_results.clone();
         let selected_anime_id_copy = selected_anime_id.clone();
         let mut search_results_browser_copy = search_results_browser.clone();
