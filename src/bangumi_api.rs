@@ -32,7 +32,9 @@ pub fn fetch_json_from_api<T: Deserialize>(url: &str, user_agent: Option<&str>) 
                     err_resp.detail.unwrap_or_default()
                 ))
             } else {
-                Err(format!("JSON 解析失败: {}. 原始响应: {}", e, response_text))
+                // 如果尝试解析为 ApiErrorResponse 也失败，则很可能响应不是 JSON 错误。
+                // 返回一个更通用的消息，不包含原始响应体，以避免显示 HTML。
+                Err(format!("API响应解析失败: 无法识别的错误格式。初始JSON解析错误: {}", e))
             }
         }
     }

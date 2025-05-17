@@ -560,22 +560,25 @@ fn handle_search_button_callback(
         println!("正在搜索: {}", query);
         match <Vec<api::BangumiSubject> as api::ResourceFetcher<&str>>::fetch(&query) {
             Ok(subjects) => {
-                println!("搜索成功，找到 {} 个结果", subjects.len());
-                search_results_browser.clear();
-                for subject in &subjects {
-                    let display_name = if subject.name_cn.is_empty() {
-                        &subject.name
-                    } else {
-                        &subject.name_cn
-                    };
-                    search_results_browser.add(&display_name.replace("&", "&&"));
+                if subjects.is_empty() {
+                    println!("未找到番剧: {}", query);
+                    search_results_browser.clear();
+                    *search_results_rc.borrow_mut() = None;
+                    dialog::message_default(&format!("未找到与“{}”相关的番剧。", query));
+                } else {
+                    println!("找到 {} 个番剧。", subjects.len());
+                    search_results_browser.clear();
+                    for subject in &subjects {
+                        search_results_browser.add(&format!("{} ({})", subject.name_cn, subject.name));
+                    }
+                    *search_results_rc.borrow_mut() = Some(subjects);
                 }
-                *search_results_rc.borrow_mut() = Some(subjects);
             }
             Err(err_msg) => {
-                println!("搜索失败: {}", err_msg);
-                dialog::message_default(&format!("搜索失败: {}", err_msg));
-                *search_results_rc.borrow_mut() = None; // 清空旧结果
+                println!("搜索 '{}' 失败: {}", query, err_msg);
+                search_results_browser.clear();
+                *search_results_rc.borrow_mut() = None;
+                dialog::message_default(&format!("搜索“{}”失败：请检查网络连接或稍后再试。\n详细错误: {}", query, err_msg));
             }
         }
     } else {
@@ -596,22 +599,25 @@ fn handle_search_input_enter_key(
         println!("通过回车搜索: {}", query);
         match <Vec<api::BangumiSubject> as api::ResourceFetcher<&str>>::fetch(&query) {
             Ok(subjects) => {
-                println!("搜索成功，找到 {} 个结果", subjects.len());
-                search_results_browser.clear();
-                for subject in &subjects {
-                    let display_name = if subject.name_cn.is_empty() {
-                        &subject.name
-                    } else {
-                        &subject.name_cn
-                    };
-                    search_results_browser.add(&display_name.replace("&", "&&"));
+                if subjects.is_empty() {
+                    println!("未找到番剧: {}", query);
+                    search_results_browser.clear();
+                    *search_results_rc.borrow_mut() = None;
+                    dialog::message_default(&format!("未找到与“{}”相关的番剧。", query));
+                } else {
+                    println!("找到 {} 个番剧。", subjects.len());
+                    search_results_browser.clear();
+                    for subject in &subjects {
+                        search_results_browser.add(&format!("{} ({})", subject.name_cn, subject.name));
+                    }
+                    *search_results_rc.borrow_mut() = Some(subjects);
                 }
-                *search_results_rc.borrow_mut() = Some(subjects);
             }
             Err(err_msg) => {
-                println!("搜索失败: {}", err_msg);
-                dialog::message_default(&format!("搜索失败: {}", err_msg));
-                *search_results_rc.borrow_mut() = None; // 清空旧结果
+                println!("搜索 '{}' 失败: {}", query, err_msg);
+                search_results_browser.clear();
+                *search_results_rc.borrow_mut() = None;
+                dialog::message_default(&format!("搜索“{}”失败：请检查网络连接或稍后再试。\n详细错误: {}", query, err_msg));
             }
         }
     } else {
@@ -679,58 +685,171 @@ fn handle_done_button_callback(
     base_path_rc: Rc<RefCell<Option<String>>>,
     anime_path_rc: Rc<RefCell<Option<String>>>,
     search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
-    selected_anime_id_rc: Rc<RefCell<Option<String>>>,
+    _selected_anime_id_rc: Rc<RefCell<Option<String>>>, // ID is used for fetching, name/year from elsewhere
     search_results_browser: MultiBrowser,
 ) {
     println!("Done button clicked!");
-    println!("File browser state: value = {}, size = {}", file_browser.value(), file_browser.size());
-    if file_browser.value() > 0 {
-        if let Some(text) = file_browser.text(file_browser.value()) {
-            println!("Focused file in file_browser: {}", text);
-        }
-    }
 
     if episode_list_rc.borrow().is_none() {
-        println!("No episode data available.");
         dialog::message_default("错误：剧集列表为空。
 请先在右侧搜索并双击选定一部番剧。");
         return;
     }
-     if base_path_rc.borrow().is_none() {
-        println!("Base path is not set.");
-        dialog::message_default("错误：源路径未设定。");
+    if base_path_rc.borrow().is_none() {
+        dialog::message_default("错误：源路径（B按钮）未设定。");
+        return;
+    }
+    if anime_path_rc.borrow().is_none() {
+        dialog::message_default("错误：目标路径（A按钮）未设定。");
         return;
     }
 
-    let _episodes = episode_list_rc.borrow();
-    let _base_p = base_path_rc.borrow();
-    let _anime_p = anime_path_rc.borrow();
-    let _search_res = search_results_rc.borrow();
-    let _selected_id = selected_anime_id_rc.borrow();
-    println!("Selected anime ID: {:?}", _selected_id.as_deref().unwrap_or("None"));
-    println!("Search results browser has {} items, selected: {}", search_results_browser.size(), search_results_browser.value());
-
-    // 调用 io 模块的函数进行文件操作的示例（此处仅为示意，具体实现根据需求）
     match io::validate_operation_paths(&base_path_rc, &anime_path_rc) {
-        Ok((base_path, anime_path)) => {
-            println!("Base path: {}, Anime path: {}", base_path, anime_path);
+        Ok((base_path_str, anime_path_root_str)) => {
+            println!("Base path: {}, Anime path root: {}", base_path_str, anime_path_root_str);
             let source_files = io::collect_source_files_from_browser(&file_browser);
-            println!("Source files: {:?}", source_files);
+
+            if source_files.is_empty() {
+                dialog::message_default("错误：未在左侧文件列表中选择任何文件进行处理。");
+                return;
+            }
+            println!("Source files selected: {:?}", source_files);
 
             if let Ok(ep_collection) = get_episode_data_for_processing(&episode_list_rc) {
-                let formatted_names = ep_collection.get_formatted_names();
-                let mut cleaned_formatted_names = Vec::new();
-                for name in formatted_names {
-                    // 在这里调用 io::replace_invalid_chars
-                    cleaned_formatted_names.push(io::replace_invalid_chars(&name));
+                let year = ep_collection.year; // 读取 year 字段
+
+                // 获取选定的番剧名称
+                let anime_display_name = {
+                    let search_results_opt = search_results_rc.borrow();
+                    let selected_idx_in_browser = search_results_browser.value(); // 1-indexed
+
+                    if selected_idx_in_browser > 0 {
+                        if let Some(subjects) = search_results_opt.as_ref() {
+                            let actual_idx = (selected_idx_in_browser as usize) - 1;
+                            if actual_idx < subjects.len() {
+                                let selected_subject = &subjects[actual_idx];
+                                if !selected_subject.name_cn.is_empty() {
+                                    selected_subject.name_cn.clone()
+                                } else {
+                                    selected_subject.name.clone()
+                                }
+                            } else {
+                                dialog::message_default("错误：无法获取选定的番剧名称（列表索引越界）。
+请重新搜索并选择番剧。");
+                                return;
+                            }
+                        } else {
+                            dialog::message_default("错误：无法获取选定的番剧名称（无搜索结果缓存）。
+请重新搜索并选择番剧。");
+                            return;
+                        }
+                    } else {
+                        dialog::message_default("错误：未在右侧搜索结果中选定番剧。
+请先搜索并双击选定一部番剧。");
+                        return;
+                    }
+                };
+                
+                let cleaned_anime_name_for_folder = io::replace_invalid_chars(&anime_display_name);
+                let target_anime_folder_name = format!("{}({})", cleaned_anime_name_for_folder, year); // 使用 year 字段
+                let target_anime_dir = std::path::Path::new(&anime_path_root_str).join(target_anime_folder_name);
+
+                println!("计划创建/使用的目标番剧文件夹: {:?}", target_anime_dir);
+
+                if let Err(e) = std::fs::create_dir_all(&target_anime_dir) {
+                    dialog::message_default(&format!("错误：创建目标文件夹失败：{}
+路径：{:?}", e, target_anime_dir));
+                    return;
                 }
-                println!("Formatted and cleaned episode names: {:?}", cleaned_formatted_names);
-                // 此处可以继续实现重命名逻辑
-                dialog::message_default("重命名功能尚未实现。
-请在控制台查看选定项和待处理文件名的调试信息。");
+
+                let formatted_episode_names = ep_collection.get_formatted_names();
+                
+                if source_files.len() > formatted_episode_names.len() {
+                     let msg = format!(
+                        "警告：选中的文件数量 ({}) 大于获取到的剧集数量 ({}).
+多余的文件将不会被重命名。
+是否继续?",
+                        source_files.len(),
+                        formatted_episode_names.len()
+                    );
+                    if dialog::choice2_default(&msg, "继续", "取消", "") != Some(0) {
+                        return;
+                    }
+                }
+
+
+                let mut successful_renames = 0;
+                let mut failed_renames = 0;
+                let mut errors_log = Vec::new();
+
+                for (i, source_file_name_str) in source_files.iter().enumerate() {
+                    if i >= formatted_episode_names.len() {
+                        let err_msg = format!("跳过文件 '{}': 没有对应的剧集名称 (选中 {} 个文件, 获取到 {} 个剧集名)。", source_file_name_str, source_files.len(), formatted_episode_names.len());
+                        println!("{}", err_msg);
+                        errors_log.push(err_msg);
+                        // failed_renames += 1; // Not a failure of rename, but a skip.
+                        continue;
+                    }
+
+                    let source_file_path = std::path::Path::new(&base_path_str).join(source_file_name_str);
+                    let original_extension = source_file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                    
+                    let cleaned_episode_name_part = io::replace_invalid_chars(&formatted_episode_names[i]);
+                    let new_file_name_str = if original_extension.is_empty() {
+                        cleaned_episode_name_part.clone()
+                    } else {
+                        format!("{}.{}", cleaned_episode_name_part, original_extension)
+                    };
+                    
+                    let target_file_path = target_anime_dir.join(&new_file_name_str);
+
+                    println!("准备重命名: {:?} -> {:?}", source_file_path, target_file_path);
+
+                    if source_file_path == target_file_path {
+                        let msg = format!("跳过文件 '{}': 源路径和目标路径相同。", source_file_name_str);
+                        println!("{}", msg);
+                        errors_log.push(msg);
+                        continue;
+                    }
+                    if target_file_path.exists() {
+                        let msg = format!("跳过文件 '{}': 目标文件 '{}' 已存在。", source_file_name_str, target_file_path.display());
+                         println!("{}", msg);
+                        errors_log.push(msg);
+                        failed_renames +=1;
+                        continue;
+                    }
+
+
+                    if let Err(e) = std::fs::rename(&source_file_path, &target_file_path) {
+                        let err_msg = format!("重命名 '{}' 失败: {}", source_file_name_str, e);
+                        println!("{}", err_msg);
+                        errors_log.push(err_msg);
+                        failed_renames += 1;
+                    } else {
+                        successful_renames += 1;
+                    }
+                }
+                
+                // Reload files in base_path_str to reflect changes
+                io::load_files_to_file_browser(&base_path_str, &mut file_browser.clone());
+
+
+                let mut summary_message = format!("重命名操作完成。
+成功: {}
+失败: {}", successful_renames, failed_renames);
+                if !errors_log.is_empty() {
+                    summary_message.push_str("
+
+日志详情:
+");
+                    summary_message.push_str(&errors_log.join("
+"));
+                }
+                dialog::message_default(&summary_message);
 
             } else {
-                 dialog::message_default("错误：无法获取剧集数据进行处理。");
+                 dialog::message_default("错误：无法获取剧集数据进行处理。
+请重新搜索并双击选定一部番剧。");
             }
         }
         Err(e) => {
