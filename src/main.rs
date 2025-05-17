@@ -15,6 +15,7 @@ use fltk::{
 use std::{
     cell::RefCell,
     path::Path, // 移除未使用的 PathBuf
+    path::Component,
     rc::Rc,
     env,
     // fs::File, // 移除，如果不再需要生成临时文件
@@ -164,6 +165,7 @@ impl Ep {
 const WINDOW_WIDTH: i32 = 800;
 const WINDOW_HEIGHT: i32 = 600;
 const HALF_WIDTH: i32 = WINDOW_WIDTH / 2;
+const MAX_BUTTON_LABEL_LEN: usize = 25; // 新增：按钮标签的最大字符数
 
 // --- 新增：定义命令行参数 ---
 #[derive(Parser, Debug)]
@@ -261,6 +263,125 @@ fn load_files_to_file_browser(path_str: &str, browser: &mut FileBrowser) {
 //         .status()
 //     }
 // }
+
+// --- 新增：辅助函数，用于缩短路径以在按钮上显示 ---
+fn shorten_path_for_display(path_str: &str, max_len: usize) -> String {
+    if path_str.is_empty() {
+        return "".to_string();
+    }
+    if path_str.len() <= max_len {
+        return path_str.to_string();
+    }
+
+    let path = Path::new(path_str);
+    let ellipsis = "...\\"; // Windows style separator
+
+    // 1. 获取盘符前缀 (例如 "C:\\")
+    let drive_prefix_str = path.components().next().and_then(|c| match c {
+        Component::Prefix(prefix_component) => {
+            let prefix_os_str = prefix_component.as_os_str();
+            let prefix_cow = prefix_os_str.to_string_lossy();
+            let s = prefix_cow.as_ref();
+            if s.ends_with(':') { // C:
+                Some(format!("{}:\\", s.trim_end_matches(':')))
+            } else if s.starts_with("\\\\") { // UNC 路径，例如 \\\\server\\share
+                Some(format!("{}\\", s.trim_end_matches('\\')))
+            } else { // 其他前缀类型
+                Some(format!("{}\\", s.trim_end_matches('\\')))
+            }
+        },
+        _ => None,
+    }).unwrap_or_else(|| { // 简单路径的回退处理，例如 "C:\\path"
+        if path_str.len() > 1 && path_str.chars().nth(1) == Some(':') && path_str.chars().nth(2) == Some('\\') {
+            format!("{}:\\", path_str.chars().next().unwrap_or_default())
+        } else if path_str.starts_with("\\\\") { // UNC 的进一步回退
+            let parts: Vec<&str> = path_str.splitn(4, '\\').filter(|s| !s.is_empty()).collect();
+            if parts.len() >= 2 { format!("\\\\{}\\{}\\", parts[0], parts[1]) } else { "".to_string() }
+        }
+        else { "".to_string() }
+    });
+
+    // Handle cases where the path is the drive prefix itself (moved from original lines 314-316)
+    if !drive_prefix_str.is_empty() && (path_str == drive_prefix_str.trim_end_matches('\\') || path_str == drive_prefix_str) {
+        return if drive_prefix_str.len() <= max_len {
+            drive_prefix_str // Return the original string if it fits
+        } else {
+            drive_prefix_str.chars().take(max_len).collect() // Truncate drive prefix if it's too long
+        };
+    }
+
+    // New logic starts here, replacing the previous "Main strategy" and "Fallback logic"
+    let final_component_name = path.file_name()
+        .and_then(|os_str| os_str.to_str())
+        .unwrap_or("");
+
+    let parent_folder_name = path.parent()
+        .and_then(|p| p.file_name()) // Get the last component of the parent path
+        .and_then(|os_str| os_str.to_str())
+        .unwrap_or("");
+
+    // Use `ellipsis` directly ("...\\") for path construction, and a simple "..." for the final fallback.
+
+    // Strategy 1 & 2: Try with "Drive:\\...\\ParentFolder\\FinalComponent"
+    if !drive_prefix_str.is_empty() && !parent_folder_name.is_empty() && !final_component_name.is_empty() {
+        let len_with_parent_and_final = drive_prefix_str.len()
+            + ellipsis.len() // ellipsis is "...\\\\"
+            + parent_folder_name.len()
+            + 1 // for the separator between parent and final
+            + final_component_name.len();
+
+        if len_with_parent_and_final <= max_len {
+            return format!("{}{}{}\\{}", drive_prefix_str, ellipsis, parent_folder_name, final_component_name);
+        }
+
+        // Strategy 2: "Drive:\\...\\ParentFolder\\FinalComp..."
+        let space_for_final_after_parent = max_len.saturating_sub(
+            drive_prefix_str.len()
+            + ellipsis.len()
+            + parent_folder_name.len()
+            + 1 // separator
+        );
+
+        if space_for_final_after_parent > 0 {
+            let shortened_final: String = final_component_name.chars().take(space_for_final_after_parent).collect();
+            if !shortened_final.is_empty() { // Avoid "Drive:\\...\\Parent\\"
+                return format!("{}{}{}\\{}", drive_prefix_str, ellipsis, parent_folder_name, shortened_final);
+            }
+        }
+    }
+
+    // Strategy 3 & 4: Try with "Drive:\\...\\FinalComponent" (fallback if parent cannot be shown)
+    if !drive_prefix_str.is_empty() && !final_component_name.is_empty() {
+        let len_with_final_only = drive_prefix_str.len() + ellipsis.len() + final_component_name.len();
+        if len_with_final_only <= max_len {
+            return format!("{}{}{}", drive_prefix_str, ellipsis, final_component_name);
+        }
+
+        // Strategy 4: "Drive:\\...\\FinalComp..."
+        let remaining_space_for_filename = max_len
+            .saturating_sub(drive_prefix_str.len())
+            .saturating_sub(ellipsis.len());
+        
+        if remaining_space_for_filename > 0 {
+            let shortened_filename: String = final_component_name.chars().take(remaining_space_for_filename).collect();
+            if !shortened_filename.is_empty() { // Avoid "Drive:\\...\\"
+                return format!("{}{}{}", drive_prefix_str, ellipsis, shortened_filename);
+            }
+        }
+    }
+    
+    // Final Fallback logic: "...<end of path>" or "<start of path>"
+    let fallback_ellipsis = "..."; // Use "..." for this style, not "...\\"
+    if max_len > fallback_ellipsis.len() {
+        let chars_from_end_to_take = max_len - fallback_ellipsis.len();
+        // Ensure skip count doesn't exceed path_str.len()
+        let skip_count = path_str.len().saturating_sub(chars_from_end_to_take);
+        format!("{}{}", fallback_ellipsis, &path_str.chars().skip(skip_count).collect::<String>())
+    } else {
+        // If max_len is too small even for "...", just take the beginning of the path.
+        path_str.chars().take(max_len).collect()
+    }
+}
 
 fn main() {
     let cli_args = CliArgs::parse(); // --- 新增：解析命令行参数 ---
@@ -582,7 +703,7 @@ fn main() {
       
     // --- 新增：如果通过命令行参数设置了路径，则更新UI ---
     if let Some(cli_base_path_str) = base_path.borrow().as_deref() {
-        btn_choose_base.set_label(cli_base_path_str); // 更新按钮B的标签
+        btn_choose_base.set_label(&shorten_path_for_display(cli_base_path_str, MAX_BUTTON_LABEL_LEN)); // 更新按钮B的标签
         load_files_to_file_browser(cli_base_path_str, &mut file_browser); // 加载文件
 
         // --- 新增：如果 -b 参数存在，尝试提取番剧名并填充搜索框 ---
@@ -594,7 +715,7 @@ fn main() {
     }
 
     if let Some(cli_anime_path_str) = anime_path.borrow().as_deref() {
-        btn_choose_anime.set_label(cli_anime_path_str); // 更新按钮A的标签
+        btn_choose_anime.set_label(&shorten_path_for_display(cli_anime_path_str, MAX_BUTTON_LABEL_LEN)); // 更新按钮A的标签
     }
     // --- UI 更新结束 ---
 
@@ -790,7 +911,7 @@ fn main() {
                 if path.is_dir() {
                     if let Some(path_str) = path.to_str() {
                         *base_path_copy.borrow_mut() = Some(path_str.to_string());
-                        btn_choose_base_clone.set_label(path_str); 
+                        btn_choose_base_clone.set_label(&shorten_path_for_display(path_str, MAX_BUTTON_LABEL_LEN)); 
                         
                         load_files_to_file_browser(path_str, &mut file_browser_clone);
 
@@ -823,7 +944,7 @@ fn main() {
                     if let Some(path_str) = path.to_str() {
                         *anime_path_copy.borrow_mut() = Some(path_str.to_string());
                         // anime_path_display_copy.set_value(path_str);
-                        btn_choose_anime_clone.set_label(path_str); // 更新按钮A的标签
+                        btn_choose_anime_clone.set_label(&shorten_path_for_display(path_str, MAX_BUTTON_LABEL_LEN)); // 更新按钮A的标签
                     }
                 }
             }
