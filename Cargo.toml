@@ -7,15 +7,15 @@ edition = "2021"
 
 [dependencies]
 fltk = { version = "^1.5", features = ["fltk-bundled"] }
-minreq = { version = "2.13.4", features = ["https-rustls-probe"] }
-rust-embed = { version = "8.7.0", features = ["include-exclude"] }
-anitomy = "0.2.0"
-rfd = "0.15.3"
-miniserde = "0.1.42"
-urlencoding = "2.1.3"
-clap = { version = "4.5.38", features = ["derive"] }
+clap = { version = "^4.0", features = ["derive"] }
+miniserde = "^0.1"
+minreq = { version = "^2", features = ["https-rustls-probe"] }
+urlencoding = "^2.1"
 webbrowser = "1.0.4"
 winreg = "0.55.0"
+natord = "^1.0"
+uuid = { version = "^1.0", features = ["v4"] }
+
 [build-dependencies]
 embed-resource = "3.0.2"
 
