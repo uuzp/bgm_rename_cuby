@@ -32,6 +32,16 @@ use minreq;
 use urlencoding;
 use webbrowser; // 新增：导入 webbrowser crate
 
+// --- 新增：从 lib.rs 移动过来的辅助函数 ---
+pub fn replace2(s:&str) -> String {
+    let s = s.replace("/", "／");
+    let s = s.replace("\\", "＼");
+    let s = s.replace("<", "＜");
+    let s = s.replace(">", "＞");
+    s
+}
+// --- 移动辅助函数结束 ---
+
 // 从lib.rs复制过来，直接在main.rs中定义
 #[derive(Deserialize, Serialize)]
 struct SearchResult {
