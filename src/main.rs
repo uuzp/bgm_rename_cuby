@@ -3,109 +3,50 @@
 // --- 模块导入 ---
 mod bangumi_api;
 mod io;
+mod ui;
+mod ui_core;
 
 // --- 使用声明 ---
-use fltk::{
-    app,
-    browser::{FileBrowser, MultiBrowser},
-    button::Button,
-    dialog,
-    enums::{Color, Event, Key},
-    frame::Frame,
-    group::Flex,
-    input::Input,
-    prelude::*,
-    window::Window,
-};
-use std::{
-    cell::RefCell,
-    rc::Rc,
-};
-
+use fltk::{app, prelude::*, window::Window, group::Flex, button::Button, browser::FileBrowser, input::Input, browser::MultiBrowser, enums::Event, dialog::{self, FileDialog, FileDialogType}, frame::Frame, enums::Color, enums::Key}; // 添加 fltk 组件并修正 dialog
 use clap::Parser; // 导入 clap::Parser
-use webbrowser;
-
-// --- 别名 ---
-use bangumi_api as api; // API 操作使用别名 api
-// io 模块直接使用 io::
+use std::rc::Rc; // 添加 Rc
+use std::cell::RefCell; // 添加 RefCell
 
 // --- 常量 ---
-const WINDOW_WIDTH: i32 = 800;
-const WINDOW_HEIGHT: i32 = 600;
-const HALF_WIDTH: i32 = WINDOW_WIDTH / 2;
-const MENU_TRIGGER_HEIGHT: i32 = 30; // 菜单触发器行高度
-const MENU_ITEMS_PANEL_EXPANDED_HEIGHT: i32 = 35; // 菜单项面板展开高度
-const PATH_DISPLAY_PANEL_EXPANDED_HEIGHT: i32 = 30; // 路径显示面板展开高度
-const MAX_BUTTON_LABEL_LEN: usize = 20; // 按钮标签最大显示字符数（粗略）
-
+pub const WINDOW_WIDTH: i32 = 800;
+pub const WINDOW_HEIGHT: i32 = 600;
+pub const HALF_WIDTH: i32 = WINDOW_WIDTH / 2;
+pub const MENU_TRIGGER_HEIGHT: i32 = 30; // 菜单触发器行高度
+pub const MENU_ITEMS_PANEL_EXPANDED_HEIGHT: i32 = 35; // 菜单项面板展开高度
+pub const PATH_DISPLAY_PANEL_EXPANDED_HEIGHT: i32 = 30; // 路径显示面板展开高度
+pub const MAX_BUTTON_LABEL_LEN: usize = 20; // 按钮标签最大显示字符数（粗略）
 
 // --- 命令行参数定义 ---
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
-struct CliArgs {
+pub struct CliArgs {
     /// 源文件路径（包含视频文件的文件夹）
     #[arg(short, long)]
-    base_path: Option<String>,
+    pub base_path: Option<String>,
 
     /// 目标文件路径（重命名后文件存放的文件夹）
     #[arg(short, long)]
-    anime_path: Option<String>,
+    pub anime_path: Option<String>,
 }
 
 // --- 主函数 ---
 fn main() {
+    // 解析命令行参数
     let cli_args = CliArgs::parse();
+    
+    // 初始化 FLTK 应用
     let app = app::App::default().with_scheme(app::Scheme::Gtk);
-    let mut wind = create_main_window();
-
-    let (base_path_rc, anime_path_rc) = initialize_paths_from_cli(&cli_args);
-
-    let (mut btn_choose_base, mut btn_choose_anime, mut btn_done, mut search_input, mut search_button) = create_core_controls();
-    let (mut settings_button, mut unregister_button, mut about_button) = create_menu_buttons();
-    let (mut file_browser, mut search_results_browser) = create_main_browsers();
-
-    let (
-        mut main_vertical_flex,
-        mut menu_trigger_button,
-        mut path_trigger_button,
-        mut menu_items_panel_flex,
-        mut path_display_panel_flex,
-    ) = build_ui_layout(
-        &mut wind,
-        &btn_choose_base, &btn_choose_anime, &btn_done, &search_input, &search_button,
-        &settings_button, &unregister_button, &about_button,
-        &mut file_browser, &mut search_results_browser,
-    );
-
-    let (is_menu_expanded, is_path_panel_expanded, search_results_rc, episode_list_rc, selected_anime_id_rc) =
-        initialize_ui_state_and_apply_cli_args(
-            &base_path_rc, &anime_path_rc,
-            &mut btn_choose_base, &mut btn_choose_anime,
-            &mut file_browser, &mut search_input,
-        );
-
-    let file_browser_clone_for_base_cb = file_browser.clone();
-    let search_input_clone_for_base_cb = search_input.clone();
-    let search_results_browser_clone_for_search_actions = search_results_browser.clone();
-    let file_browser_clone_for_done_cb = file_browser.clone();
-    let search_results_browser_clone_for_done_cb = search_results_browser.clone();
-
-    register_all_callbacks(
-        &mut wind,
-        &mut main_vertical_flex,
-        &mut menu_trigger_button, is_menu_expanded.clone(), &mut menu_items_panel_flex,
-        &mut path_trigger_button, is_path_panel_expanded.clone(), &mut path_display_panel_flex,
-        &mut settings_button, &mut unregister_button, &mut about_button,
-        &mut btn_choose_base, base_path_rc.clone(), file_browser_clone_for_base_cb, search_input_clone_for_base_cb,
-        &mut btn_choose_anime, anime_path_rc.clone(),
-        &mut search_input, &mut search_button, search_results_rc.clone(), search_results_browser_clone_for_search_actions,
-        &mut search_results_browser, search_results_rc.clone(), episode_list_rc.clone(), selected_anime_id_rc.clone(),
-        &mut file_browser,
-        &mut btn_done, file_browser_clone_for_done_cb, episode_list_rc.clone(), base_path_rc.clone(), anime_path_rc.clone(),
-        search_results_rc.clone(), selected_anime_id_rc.clone(), search_results_browser_clone_for_done_cb,
-    );
-
-    wind.show();
+    
+    // 创建并初始化UI
+    let mut main_window = ui::create_ui(&cli_args);
+    
+    // 显示窗口并运行应用
+    main_window.show();
     app.run().unwrap();
 }
 
@@ -210,15 +151,15 @@ fn initialize_ui_state_and_apply_cli_args(
 ) -> (
     Rc<RefCell<bool>>,
     Rc<RefCell<bool>>,
-    Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
-    Rc<RefCell<Option<api::EpisodeCollection>>>,  // 修改类型
-    Rc<RefCell<Option<String>>>, // selected_anime_id_rc (保持 String, 因为API ID可能很大)
+    Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>>,
+    Rc<RefCell<Option<bangumi_api::EpisodeCollection>>>,  // 修改类型
+    Rc<RefCell<Option<String>>> // selected_anime_id_rc (保持 String, 因为API ID可能很大)
 ) {
     let is_menu_expanded = Rc::new(RefCell::new(false));
     let is_path_panel_expanded = Rc::new(RefCell::new(false));
     // 修改类型
-    let search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>> = Rc::new(RefCell::new(None));
-    let episode_list_rc: Rc<RefCell<Option<api::EpisodeCollection>>> = Rc::new(RefCell::new(None));
+    let search_results_rc: Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>> = Rc::new(RefCell::new(None));
+    let episode_list_rc: Rc<RefCell<Option<bangumi_api::EpisodeCollection>>> = Rc::new(RefCell::new(None));
     let selected_anime_id_rc: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
 
     if let Some(cli_base_path_str) = base_path_rc.borrow().as_deref() {
@@ -328,19 +269,19 @@ fn register_all_callbacks(
     anime_path_rc: Rc<RefCell<Option<String>>>,
     search_input_for_search_cb: &mut Input,
     search_button: &mut Button,
-    search_results_rc_for_search: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
+    search_results_rc_for_search: Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>>,
     search_results_browser_for_search_actions: MultiBrowser,
     search_results_browser: &mut MultiBrowser,
-    search_results_rc_for_dblclick: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
-    episode_list_rc_for_dblclick: Rc<RefCell<Option<api::EpisodeCollection>>>, // 修改类型
+    search_results_rc_for_dblclick: Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>>,
+    episode_list_rc_for_dblclick: Rc<RefCell<Option<bangumi_api::EpisodeCollection>>>, // 修改类型
     selected_anime_id_rc_for_dblclick: Rc<RefCell<Option<String>>>,
-    file_browser: &mut FileBrowser,
+    file_browser: &mut FileBrowser, // 修正这里的逗号缺失
     btn_done: &mut Button,
     file_browser_for_done_cb: FileBrowser,
-    episode_list_rc_for_done: Rc<RefCell<Option<api::EpisodeCollection>>>, // 修改类型
+    episode_list_rc_for_done: Rc<RefCell<Option<bangumi_api::EpisodeCollection>>>, // 修改类型
     base_path_rc_for_done: Rc<RefCell<Option<String>>>,
     anime_path_rc_for_done: Rc<RefCell<Option<String>>>,
-    search_results_rc_for_done: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>, // 修改类型
+    search_results_rc_for_done: Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>>, // 修改类型
     selected_anime_id_rc_for_done: Rc<RefCell<Option<String>>>,
     search_results_browser_for_done_cb: MultiBrowser,
 ) {
@@ -484,7 +425,7 @@ fn handle_path_panel_toggle(is_path_panel_expanded: Rc<RefCell<bool>>, main_flex
 }
 
 fn handle_choose_base_path_callback(base_path_rc: Rc<RefCell<Option<String>>>, mut btn_choose_base: Button, mut file_browser: FileBrowser, mut search_input: Input) {
-    let mut dialog = dialog::FileDialog::new(dialog::FileDialogType::BrowseDir);
+    let mut dialog = FileDialog::new(FileDialogType::BrowseDir);
     dialog.set_title("选择源文件夹 (B)");
     dialog.show();
     let chosen_path_pb = dialog.filename();
@@ -505,7 +446,7 @@ fn handle_choose_base_path_callback(base_path_rc: Rc<RefCell<Option<String>>>, m
 }
 
 fn handle_choose_anime_path_callback(anime_path_rc: Rc<RefCell<Option<String>>>, mut btn_choose_anime: Button) {
-    let mut dialog = dialog::FileDialog::new(dialog::FileDialogType::BrowseDir);
+    let mut dialog = FileDialog::new(FileDialogType::BrowseDir);
     dialog.set_title("选择目标文件夹 (A)");
     dialog.show();
     let chosen_path = dialog.filename();
@@ -520,12 +461,92 @@ fn handle_choose_anime_path_callback(anime_path_rc: Rc<RefCell<Option<String>>>,
     }
 }
 
-fn handle_file_browser_events(_browser: &mut FileBrowser, event: Event) -> bool {
+fn handle_file_browser_events(browser: &mut FileBrowser, event: Event) -> bool {
+    static mut DRAG_ITEM: i32 = -1;
+    static mut HIGHLIGHTED_LINE: i32 = -1;
+    
     match event {
-        Event::Push => { false },
-        Event::KeyDown => { false  },
-        Event::Drag => { false },
-        Event::Released => { false },
+        Event::Push => {
+            if app::event_clicks() { // 双击事件
+                unsafe { 
+                    HIGHLIGHTED_LINE = browser.value();
+                    println!("高亮行: {}", HIGHLIGHTED_LINE);
+                }
+                return true;
+            }
+            false
+        },        Event::KeyDown => {
+            let key = app::event_key();
+            if key == fltk::enums::Key::from_char(' ') {
+                let current_line = browser.value();
+                unsafe {
+                    if HIGHLIGHTED_LINE == -1 {
+                        // 第一次按空格，设置高亮行
+                        HIGHLIGHTED_LINE = current_line;
+                        println!("高亮行: {}", HIGHLIGHTED_LINE);
+                        browser.select(current_line); // 高亮选中该行
+                        return true;
+                    } else if current_line != HIGHLIGHTED_LINE && current_line > 0 {
+                        // 第二次按空格，交换行
+                        println!("交换行: {} 与 {}", HIGHLIGHTED_LINE, current_line);
+                        
+                        // 获取两行的文本
+                        let text1 = browser.text(HIGHLIGHTED_LINE).unwrap_or_default().to_string();
+                        let text2 = browser.text(current_line).unwrap_or_default().to_string();
+                        
+                        // 交换内容
+                        browser.set_text(HIGHLIGHTED_LINE, &text2);
+                        browser.set_text(current_line, &text1);
+                          // 重置高亮行
+                        HIGHLIGHTED_LINE = -1;
+                        browser.deselect(current_line);
+                        browser.redraw();
+                        return true;
+                    } else {
+                        // 取消高亮
+                        HIGHLIGHTED_LINE = -1;
+                        browser.deselect(current_line);
+                        return true;
+                    }
+                }
+            }
+            false
+        },
+        Event::Drag => {
+            unsafe {
+                let y = app::event_y();
+                let item = browser.value();
+                
+                if DRAG_ITEM < 0 {
+                    DRAG_ITEM = item; // 记录开始拖拽的项
+                    return true;
+                }
+                  // 计算当前移动到哪一行
+                // 由于没有直接的方法，使用当前选中行
+                let new_item = browser.value();
+                
+                if new_item > 0 && new_item != DRAG_ITEM {
+                    // 获取两行的文本
+                    let text1 = browser.text(DRAG_ITEM).unwrap_or_default().to_string();
+                    let text2 = browser.text(new_item).unwrap_or_default().to_string();
+                    
+                    // 交换内容
+                    browser.set_text(DRAG_ITEM, &text2);
+                    browser.set_text(new_item, &text1);
+                      DRAG_ITEM = new_item; // 更新拖拽的项
+                    browser.select(new_item); // 更新选中状态
+                    browser.redraw();
+                    return true;
+                }
+            }
+            true
+        },
+        Event::Released => {
+            unsafe {
+                DRAG_ITEM = -1; // 重置拖拽项
+            }
+            true
+        },
         _ => false,
     }
 }
@@ -552,13 +573,13 @@ fn handle_about_button() {
 /// 处理搜索按钮点击的回调
 fn handle_search_button_callback(
     search_input: Input,
-    search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
+    search_results_rc: Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>>,
     mut search_results_browser: MultiBrowser,
 ) {
     let query = search_input.value();
     if !query.is_empty() {
         println!("正在搜索: {}", query);
-        match <Vec<api::BangumiSubject> as api::ResourceFetcher<&str>>::fetch(&query) {
+        match <Vec<bangumi_api::BangumiSubject> as bangumi_api::ResourceFetcher<&str>>::fetch(&query) {
             Ok(subjects) => {
                 if subjects.is_empty() {
                     println!("未找到番剧: {}", query);
@@ -591,13 +612,13 @@ fn handle_search_button_callback(
 /// 处理搜索输入框回车键事件
 fn handle_search_input_enter_key(
     search_input: Input,
-    search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
+    search_results_rc: Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>>,
     mut search_results_browser: MultiBrowser,
 ) -> bool {
     let query = search_input.value();
     if !query.is_empty() {
         println!("通过回车搜索: {}", query);
-        match <Vec<api::BangumiSubject> as api::ResourceFetcher<&str>>::fetch(&query) {
+        match <Vec<bangumi_api::BangumiSubject> as bangumi_api::ResourceFetcher<&str>>::fetch(&query) {
             Ok(subjects) => {
                 if subjects.is_empty() {
                     println!("未找到番剧: {}", query);
@@ -631,8 +652,8 @@ fn handle_search_input_enter_key(
 /// 处理搜索结果列表项双击事件
 fn handle_search_results_double_click(
     browser: &mut MultiBrowser,
-    search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
-    episode_list_rc: Rc<RefCell<Option<api::EpisodeCollection>>>,    // 修改类型
+    search_results_rc: Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>>,
+    episode_list_rc: Rc<RefCell<Option<bangumi_api::EpisodeCollection>>>,    // 修改类型
     selected_anime_id_rc: Rc<RefCell<Option<String>>>,
 ) {
     if app::event_clicks() {
@@ -644,7 +665,7 @@ fn handle_search_results_double_click(
                     let subject_id = subjects[idx].id;
                     println!("双击选中番剧ID: {}", subject_id);
 
-                    match <api::EpisodeCollection as api::ResourceFetcher<u64>>::fetch(subject_id) {
+                    match <bangumi_api::EpisodeCollection as bangumi_api::ResourceFetcher<u64>>::fetch(subject_id) {
                         Ok(ep_collection) => {
                             println!("获取到剧集信息: {} 个", ep_collection.episodes.len());
                             *episode_list_rc.borrow_mut() = Some(ep_collection);
@@ -665,8 +686,8 @@ fn handle_search_results_double_click(
 
 /// 从 RefCell 中安全地获取剧集数据以供处理
 fn get_episode_data_for_processing(
-    episode_list_rc: &Rc<RefCell<Option<api::EpisodeCollection>>>
-) -> Result<api::EpisodeCollection, String> {
+    episode_list_rc: &Rc<RefCell<Option<bangumi_api::EpisodeCollection>>>
+) -> Result<bangumi_api::EpisodeCollection, String> {
     match episode_list_rc.borrow().as_ref() {
         Some(ep_data) => Ok(ep_data.clone()),
         None => {
@@ -681,10 +702,10 @@ fn get_episode_data_for_processing(
 #[allow(clippy::too_many_arguments)]
 fn handle_done_button_callback(
     file_browser: FileBrowser,
-    episode_list_rc: Rc<RefCell<Option<api::EpisodeCollection>>>,
+    episode_list_rc: Rc<RefCell<Option<bangumi_api::EpisodeCollection>>>,
     base_path_rc: Rc<RefCell<Option<String>>>,
     anime_path_rc: Rc<RefCell<Option<String>>>,
-    search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
+    search_results_rc: Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>>,
     _selected_anime_id_rc: Rc<RefCell<Option<String>>>, // ID is used for fetching, name/year from elsewhere
     search_results_browser: MultiBrowser,
 ) {
