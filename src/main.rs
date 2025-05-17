@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"] // 新增：禁止在 Windows 上显示控制台窗口
 // filepath: a:\Dev\PJ\bgm_rename_cuby\src\main.rs
 use fltk::{
     app,
@@ -13,17 +14,22 @@ use fltk::{
 };
 use std::{
     cell::RefCell,
-    path::Path, 
+    path::Path, // 移除未使用的 PathBuf
     rc::Rc,
-    // fs, // Removed fs as it's not directly used in the provided snippet, assuming it's used elsewhere or implicitly
-    // io, // Removed io for the same reason as fs
+    env,
+    // fs::File, // 移除，如果不再需要生成临时文件
+    // io::Write, // 移除，如果不再需要生成临时文件
+    // process::{Command, ExitStatus}, // 移除，不再调用外部命令
 };
+use winreg::enums::*; // 新增：导入 winreg enums
+use winreg::RegKey;  // 新增：导入 winreg RegKey
 
-use clap::Parser; // 新增：导入 clap Parser
+use clap::Parser;
 use miniserde::{Deserialize, Serialize};
 use miniserde::json;
 use minreq;
 use urlencoding;
+use webbrowser; // 新增：导入 webbrowser crate
 
 // 从lib.rs复制过来，直接在main.rs中定义
 #[derive(Deserialize, Serialize)]
@@ -228,6 +234,33 @@ fn load_files_to_file_browser(path_str: &str, browser: &mut FileBrowser) {
     }
 }
 
+// --- 移除不再使用的 run_reg_command_elevated 函数 ---
+// fn run_reg_command_elevated(args: &[String]) -> Result<ExitStatus, std::io::Error> {
+//     let mut arg_list_str = String::new();
+//     for (i, arg) in args.iter().enumerate() {
+//         if i > 0 {
+//             arg_list_str.push_str(", ");
+//         }
+//         // 在 PowerShell 中正确引用参数，特别是包含空格的路径或值
+//         // PowerShell 中字符串用单引号，内部单引号用两个单引号转义
+//         arg_list_str.push_str(&format!("\'\'\'{}\'\'\'", arg.replace("\'", "\'\'\'\'")));
+//     }
+//
+//     let ps_command_str = format!(
+//         "Start-Process reg.exe -ArgumentList ({}) -Verb RunAs -Wait -WindowStyle Hidden",
+//         arg_list_str
+//     );
+//
+//     Command::new("powershell.exe")
+//         .arg("-NoProfile")
+//         .arg("-NonInteractive")
+//         .arg("-WindowStyle")
+//         .arg("Hidden")
+//         .arg("-Command")
+//         .arg(&ps_command_str)
+//         .status()
+//     }
+// }
 
 fn main() {
     let cli_args = CliArgs::parse(); // --- 新增：解析命令行参数 ---
@@ -250,7 +283,7 @@ fn main() {
     btn_choose_base.set_tooltip("选择源文件夹 (B)");
     let mut btn_choose_anime = Button::new(0, 0, 0, 0, "选择目标路径 (A)");
     btn_choose_anime.set_tooltip("选择目标文件夹 (A)");
-    let mut btn_done = Button::new(0, 0, 0, 0, "完成");
+    let mut btn_done = Button::new(0, 0, 0, 0, "✔️ 完成"); // 修改：添加图标
 
     // --- 新增：提前定义搜索控件 ---
     let mut search_input = Input::new(0, 0, 0, 0, "");
@@ -262,7 +295,7 @@ fn main() {
 
     // --- 修改：菜单栏 & 路径栏 UI Elements ---
     const MENU_TRIGGER_HEIGHT: i32 = 30;
-    const MENU_ITEMS_PANEL_EXPANDED_HEIGHT: i32 = 60; // 2 buttons * 30 height each
+    const MENU_ITEMS_PANEL_EXPANDED_HEIGHT: i32 = 35; // Adjusted for a single row of buttons with margin
     const PATH_DISPLAY_PANEL_EXPANDED_HEIGHT: i32 = 30; // Original height of bottom_flex
 
     let is_menu_expanded = Rc::new(RefCell::new(false));
@@ -280,14 +313,20 @@ fn main() {
     top_triggers_flex.add(&path_trigger_button);
     top_triggers_flex.fixed(&path_trigger_button, 80);
     
-    top_triggers_flex.add(&btn_done); // 将“完成”按钮添加到顶部触发器行
-    top_triggers_flex.fixed(&btn_done, 80); // 给“完成”按钮一个宽度
+    // Spacer to push the search group to the right
+    let top_spacer = Frame::new(0,0,0,0,""); 
+    top_triggers_flex.add(&top_spacer); // This spacer is flexible, pushing subsequent items to the right
 
-    let top_spacer = Frame::new(0,0,0,0,""); // 添加一个间隔，用于将搜索控件推到右侧
-    top_triggers_flex.add(&top_spacer);
+    // Search group starts here, aligned to the right of top_spacer
+    top_triggers_flex.add(&btn_done); 
+    top_triggers_flex.fixed(&btn_done, 80); // Fixed width for Done button
+
+    let search_gap_spacer = Frame::new(0,0,10,0,""); // 10px gap
+    top_triggers_flex.add(&search_gap_spacer);
+    top_triggers_flex.fixed(&search_gap_spacer, 10);
 
     // 将搜索框和搜索按钮添加到 top_triggers_flex
-    top_triggers_flex.add(&search_input); // search_input 会自动填充剩余空间
+    top_triggers_flex.add(&search_input); // search_input is flexible and will take available space
     top_triggers_flex.add(&search_button);
     top_triggers_flex.fixed(&search_button, 40); // 搜索按钮固定宽度
     
@@ -298,14 +337,20 @@ fn main() {
 
     // 可展开的菜单项面板 ("设置", "关于")
     let mut menu_items_panel_flex = Flex::new(0, 0, WINDOW_WIDTH, 0, ""); // 初始高度为0
-    menu_items_panel_flex.set_type(fltk::group::FlexType::Column);
+    menu_items_panel_flex.set_type(fltk::group::FlexType::Row); // 修改为 Row
     menu_items_panel_flex.set_margin(2); 
 
-    let mut settings_button = Button::new(0, 0, 0, 30, "设置"); 
-    let mut about_button = Button::new(0, 0, 0, 30, "关于");    
+    let mut settings_button = Button::new(0, 0, 0, 30, "📝 注册"); 
+    let mut unregister_button = Button::new(0, 0, 0, 30, "🗑️ 注销"); 
+    let mut about_button = Button::new(0, 0, 0, 30, "📦 关于"); 
 
-    menu_items_panel_flex.add(&settings_button);
-    menu_items_panel_flex.add(&about_button);
+    menu_items_panel_flex.add(&settings_button); // 注册按钮
+    menu_items_panel_flex.fixed(&settings_button, 80); 
+    menu_items_panel_flex.add(&unregister_button); // 注销按钮
+    menu_items_panel_flex.fixed(&unregister_button, 80); 
+    menu_items_panel_flex.add(&about_button); // 关于按钮
+    menu_items_panel_flex.fixed(&about_button, 100); 
+
     menu_items_panel_flex.end();
     menu_items_panel_flex.hide(); 
     main_vertical_flex.add(&menu_items_panel_flex);
@@ -591,11 +636,115 @@ fn main() {
     });
 
     settings_button.set_callback(|_| {
-        fltk::dialog::message_default("设置");
+        match env::current_exe() {
+            Ok(exe_path_buf) => {
+                let exe_path = exe_path_buf.to_string_lossy().to_string();
+                let mut errors = Vec::new();
+
+                // 目标是 HKEY_CLASSES_ROOT，它通常需要管理员权限才能写入系统范围的关联
+                // winreg crate 会尝试写入，如果权限不足，操作会失败。
+                let hkey_classes_root = RegKey::predef(HKEY_CLASSES_ROOT);
+
+                // 注册文件夹右键菜单
+                let dir_shell_path = "Directory\\shell";
+                let dir_key_name = "BgmRenameCuby";
+                let dir_command_val = format!("\"{}\" -b \"%1\" -a \"%1\\anime\"", exe_path);
+
+                match hkey_classes_root.create_subkey(format!("{}\\{}", dir_shell_path, dir_key_name)) {
+                    Ok((key, _disp)) => {
+                        if let Err(e) = key.set_value("", &"使用 BgmRenameCuby 处理文件夹") { errors.push(format!("设置文件夹菜单默认值失败: {}", e)); }
+                        if let Err(e) = key.set_value("Icon", &exe_path) { errors.push(format!("设置文件夹菜单Icon失败: {}", e)); }
+                        match key.create_subkey("command") {
+                            Ok((cmd_key, _)) => {
+                                if let Err(e) = cmd_key.set_value("", &dir_command_val) { errors.push(format!("设置文件夹命令失败: {}", e)); }
+                            }
+                            Err(e) => errors.push(format!("创建文件夹命令子键失败: {}", e)),
+                        }
+                    }
+                    Err(e) => errors.push(format!("创建文件夹菜单主键 (HKCR\\{}\\{}) 失败: {}", dir_shell_path, dir_key_name, e)),
+                }
+
+                // 注册文件夹背景右键菜单
+                let dir_bg_shell_path = "Directory\\Background\\shell";
+                // dir_key_name is the same
+                let dir_bg_command_val = format!("\"{}\" -b \"%V\" -a \"%V\\anime\"", exe_path);
+
+                match hkey_classes_root.create_subkey(format!("{}\\{}", dir_bg_shell_path, dir_key_name)) {
+                    Ok((key, _disp)) => {
+                        if let Err(e) = key.set_value("", &"BgmRenameCuby 在此处理") { errors.push(format!("设置背景菜单默认值失败: {}", e)); }
+                        if let Err(e) = key.set_value("Icon", &exe_path) { errors.push(format!("设置背景菜单Icon失败: {}", e)); }
+                        match key.create_subkey("command") {
+                            Ok((cmd_key, _)) => {
+                                if let Err(e) = cmd_key.set_value("", &dir_bg_command_val) { errors.push(format!("设置背景命令失败: {}", e)); }
+                            }
+                            Err(e) => errors.push(format!("创建背景命令子键失败: {}", e)),
+                        }
+                    }
+                    Err(e) => errors.push(format!("创建背景菜单主键 (HKCR\\{}\\{}) 失败: {}", dir_bg_shell_path, dir_key_name, e)),
+                }
+
+                if errors.is_empty() {
+                    fltk::dialog::message_default("注册表项已成功添加/更新。\n部分更改可能需要重启资源管理器或重新登录才能生效。");
+                } else {
+                    fltk::dialog::message_default(&format!("注册表操作时发生错误:\n{}\n\n请确保以管理员身份运行本程序。", errors.join("\n")));
+                }
+            }
+            Err(e) => {
+                fltk::dialog::message_default(&format!("获取程序路径失败: {}", e));
+            }
+        }
+    });
+
+    unregister_button.set_callback(|_| {
+        let mut errors = Vec::new();
+        let hkey_classes_root = RegKey::predef(HKEY_CLASSES_ROOT);
+        let mut deleted_anything = false; // 新增：跟踪是否有实际删除操作
+
+        let dir_key_path = "Directory\\shell\\BgmRenameCuby";
+        let dir_bg_key_path = "Directory\\Background\\shell\\BgmRenameCuby";
+
+        match hkey_classes_root.delete_subkey_all(dir_key_path) {
+            Ok(_) => {
+                deleted_anything = true; // 标记已删除
+            }
+            Err(e) => {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    errors.push(format!("删除文件夹菜单项失败 (HKCR\\{}): {}", dir_key_path, e));
+                }
+                // NotFound 不是错误，但表示没有删除任何东西
+            }
+        }
+
+        match hkey_classes_root.delete_subkey_all(dir_bg_key_path) {
+            Ok(_) => {
+                deleted_anything = true; // 标记已删除
+            }
+            Err(e) => {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    errors.push(format!("删除背景菜单项失败 (HKCR\\{}): {}", dir_bg_key_path, e));
+                }
+                // NotFound 不是错误，但表示没有删除任何东西
+            }
+        }
+
+        if errors.is_empty() {
+            if deleted_anything {
+                fltk::dialog::message_default("相关注册表项已成功删除。\n部分更改可能需要重启资源管理器或重新登录才能生效。");
+            } else {
+                fltk::dialog::message_default("未找到相关的注册表项，无需注销。"); // 修改：如果未删除任何内容，则显示此消息
+            }
+        } else {
+            // 修改：使用 \n 进行换行，并确保 errors.join 使用 \n
+            fltk::dialog::message_default(&format!("注销操作时发生错误:\n{}\n\n请确保以管理员身份运行本程序。", errors.join("\n")));
+        }
     });
 
     about_button.set_callback(|_| {
-        fltk::dialog::message_default("关于");
+        // fltk::dialog::message_default("关于"); // 旧的回调
+        let github_url = "https://github.com/uuzp/bgm_rename_cuby"; // 请替换为您的仓库 URL
+        if webbrowser::open(github_url).is_err() {
+            fltk::dialog::message_default(&format!("无法打开浏览器访问: {}", github_url));
+        }
     });
     
     // --- 新增：路径触发按钮回调 ---
