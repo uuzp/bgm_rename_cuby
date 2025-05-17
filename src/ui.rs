@@ -147,6 +147,7 @@ pub fn initialize_ui(cli_args: &crate::CliArgs, wind: &mut Window) -> (
 }
 
 /// UI控件集合结构体
+#[allow(dead_code)]
 pub struct UIControls {
     pub main_vertical_flex: Flex,
     pub menu_trigger_button: Button,
@@ -164,6 +165,7 @@ pub struct UIControls {
 }
 
 /// UI状态结构体
+#[allow(dead_code)]
 pub struct UIState {
     pub is_menu_expanded: Rc<RefCell<bool>>,
     pub is_path_panel_expanded: Rc<RefCell<bool>>,
@@ -362,8 +364,7 @@ pub fn register_all_callbacks(
     search_results_rc_for_done: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
     selected_anime_id_rc_for_done: Rc<RefCell<Option<String>>>,
     search_results_browser_for_done_cb: MultiBrowser,
-) {
-    // Menu Toggle Callback
+) {    // Menu Toggle Callback
     let is_menu_expanded_cb = is_menu_expanded.clone();
     let mut main_flex_cb_menu = main_vertical_flex.clone();
     let mut menu_panel_cb_menu = menu_items_panel_flex.clone();
@@ -375,9 +376,7 @@ pub fn register_all_callbacks(
             &mut menu_panel_cb_menu,
             &mut wind_cb_menu,
         );
-    });
-
-    // Path Panel Toggle Callback
+    });    // Path Panel Toggle Callback
     let is_path_panel_expanded_cb = is_path_panel_expanded.clone();
     let mut main_flex_cb_path = main_vertical_flex.clone();
     let mut path_panel_cb_path = path_display_panel_flex.clone();
@@ -431,7 +430,7 @@ pub fn register_all_callbacks(
     let search_results_cb_enter = search_results_rc_for_search.clone();
     search_input_for_search_cb.handle(move |_, ev| {
         if ev == Event::KeyDown && app::event_key() == Key::Enter {
-            return crate::handle_search_input_enter_key(
+            return ui_core::handle_search_input_enter_key(
                 search_input_cb_enter.clone(),
                 search_results_cb_enter.clone(),
                 search_results_browser_for_search_actions.clone(),

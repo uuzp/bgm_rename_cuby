@@ -94,6 +94,7 @@ pub struct EpisodeCollection { // 重命名自 Ep
 }
 
 impl EpisodeCollection {
+    #[allow(dead_code)]
     pub fn new_empty() -> Self { // 用于创建空实例
         Self { episodes: Vec::new(), year: 1970 }
     }
