@@ -27,6 +27,342 @@ use minreq;
 use urlencoding;
 use webbrowser; // 确保 webbrowser 已导入
 
+// --- Main Function (Moved to top) ---
+fn main() {
+    let cli_args = CliArgs::parse();
+    let app = app::App::default().with_scheme(app::Scheme::Gtk);
+    let mut wind = create_main_window();
+
+    let (base_path_rc, anime_path_rc) = initialize_paths_from_cli(&cli_args);
+
+    let (mut btn_choose_base, mut btn_choose_anime, mut btn_done, mut search_input, mut search_button) = create_core_controls();
+    let (mut settings_button, mut unregister_button, mut about_button) = create_menu_buttons();
+    let (mut file_browser, mut search_results_browser) = create_main_browsers();
+
+    let (
+        mut main_vertical_flex,
+        mut menu_trigger_button,
+        mut path_trigger_button,
+        mut menu_items_panel_flex,
+        mut path_display_panel_flex,
+    ) = build_ui_layout(
+        &mut wind,
+        &btn_choose_base, &btn_choose_anime, &btn_done, &search_input, &search_button,
+        &settings_button, &unregister_button, &about_button,
+        &mut file_browser, &mut search_results_browser,
+    );
+
+    let (is_menu_expanded, is_path_panel_expanded, search_results_rc, episode_list_rc, selected_anime_id_rc) =
+        initialize_ui_state_and_apply_cli_args(
+            &base_path_rc, &anime_path_rc,
+            &mut btn_choose_base, &mut btn_choose_anime,
+            &mut file_browser, &mut search_input,
+        );
+
+    // Pre-clone widgets needed for callbacks to avoid borrow checker issues
+    let file_browser_clone_for_base_cb = file_browser.clone();
+    let search_input_clone_for_base_cb = search_input.clone();
+    let search_results_browser_clone_for_search_actions = search_results_browser.clone();
+    let file_browser_clone_for_done_cb = file_browser.clone();
+    let search_results_browser_clone_for_done_cb = search_results_browser.clone();
+
+    register_all_callbacks(
+        &mut wind,
+        &mut main_vertical_flex,
+        &mut menu_trigger_button, is_menu_expanded.clone(), &mut menu_items_panel_flex,
+        &mut path_trigger_button, is_path_panel_expanded.clone(), &mut path_display_panel_flex,
+        &mut settings_button, &mut unregister_button, &mut about_button,
+        &mut btn_choose_base, base_path_rc.clone(), file_browser_clone_for_base_cb, search_input_clone_for_base_cb,
+        &mut btn_choose_anime, anime_path_rc.clone(),
+        &mut search_input, &mut search_button, search_results_rc.clone(), search_results_browser_clone_for_search_actions,
+        &mut search_results_browser, search_results_rc.clone(), episode_list_rc.clone(), selected_anime_id_rc.clone(),
+        &mut file_browser,
+        &mut btn_done, file_browser_clone_for_done_cb, episode_list_rc.clone(), base_path_rc.clone(), anime_path_rc.clone(),
+        search_results_rc.clone(), selected_anime_id_rc.clone(), search_results_browser_clone_for_done_cb,
+    );
+
+    wind.show();
+    app.run().unwrap();
+}
+
+// --- Helper Functions for main() ---
+
+fn create_main_window() -> Window {
+    Window::new(
+        100,
+        100,
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+        "BGM Rename Cuby - 番剧文件批量重命名工具",
+    )
+}
+
+fn initialize_paths_from_cli(cli_args: &CliArgs) -> (Rc<RefCell<Option<String>>>, Rc<RefCell<Option<String>>>) {
+    (
+        Rc::new(RefCell::new(cli_args.base_path.clone())),
+        Rc::new(RefCell::new(cli_args.anime_path.clone())),
+    )
+}
+
+fn create_core_controls() -> (Button, Button, Button, Input, Button) {
+    let mut btn_choose_base = Button::new(0, 0, 0, 0, "选择源路径 (B)");
+    btn_choose_base.set_tooltip("选择包含视频文件的源文件夹 (B)");
+    let mut btn_choose_anime = Button::new(0, 0, 0, 0, "选择目标路径 (A)");
+    btn_choose_anime.set_tooltip("选择重命名后文件存放的目标文件夹 (A)");
+    let mut btn_done = Button::new(0, 0, 0, 0, "✔️ 完成");
+    btn_done.set_tooltip("开始重命名操作");
+    let mut search_input = Input::new(0, 0, 0, 0, "");
+    search_input.set_tooltip("输入番剧名称关键字进行搜索");
+    let mut search_button = Button::new(0, 0, 40, 0, "🔎");
+    search_button.set_tooltip("点击搜索");
+    (btn_choose_base, btn_choose_anime, btn_done, search_input, search_button)
+}
+
+fn create_menu_buttons() -> (Button, Button, Button) {
+    let mut settings_button = Button::new(0, 0, 0, 30, "📝 注册");
+    settings_button.set_tooltip("注册右键菜单到系统");
+    let mut unregister_button = Button::new(0, 0, 0, 30, "🗑️ 注销");
+    unregister_button.set_tooltip("从系统注销右键菜单");
+    let mut about_button = Button::new(0, 0, 0, 30, "📦 关于");
+    about_button.set_tooltip("查看项目信息");
+    (settings_button, unregister_button, about_button)
+}
+
+fn create_main_browsers() -> (FileBrowser, MultiBrowser) {
+    let mut file_browser = FileBrowser::new(0, 0, 0, 0, "");
+    file_browser.set_tooltip("源文件夹中的文件列表");
+    file_browser.set_selection_color(Color::Yellow);
+    file_browser.set_type(fltk::browser::BrowserType::Hold);
+    file_browser.set_damage(true);
+
+    let mut search_results_browser = MultiBrowser::new(0, 0, 0, 0, "");
+    search_results_browser.set_tooltip("Bangumi API 搜索结果");
+    search_results_browser.set_selection_color(Color::Yellow);
+    search_results_browser.set_type(fltk::browser::BrowserType::Hold);
+    (file_browser, search_results_browser)
+}
+
+fn build_ui_layout(
+    wind: &mut Window,
+    btn_choose_base_ref: &Button, btn_choose_anime_ref: &Button, btn_done_ref: &Button,
+    search_input_ref: &Input, search_button_ref: &Button,
+    settings_button_ref: &Button, unregister_button_ref: &Button, about_button_ref: &Button,
+    file_browser: &mut FileBrowser, search_results_browser: &mut MultiBrowser,
+) -> (Flex, Button, Button, Flex, Flex) {
+    let mut main_vertical_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
+    main_vertical_flex.set_type(fltk::group::FlexType::Column);
+
+    let (menu_trigger_button, path_trigger_button, top_triggers_flex) =
+        setup_top_triggers_flex(btn_done_ref, search_input_ref, search_button_ref);
+    main_vertical_flex.add(&top_triggers_flex);
+    main_vertical_flex.fixed(&top_triggers_flex, MENU_TRIGGER_HEIGHT);
+
+    let menu_items_panel_flex =
+        setup_menu_items_panel(settings_button_ref, unregister_button_ref, about_button_ref);
+    main_vertical_flex.add(&menu_items_panel_flex);
+
+    let path_display_panel_flex = setup_path_display_panel(btn_choose_base_ref, btn_choose_anime_ref);
+    main_vertical_flex.add(&path_display_panel_flex);
+
+    let (content_flex, mut left_flex, mut right_flex) = setup_content_area();
+    left_flex.add(file_browser);
+    right_flex.add(search_results_browser);
+    main_vertical_flex.add(&content_flex);
+
+    main_vertical_flex.end();
+    wind.add(&main_vertical_flex);
+    wind.resizable(&main_vertical_flex);
+
+    (main_vertical_flex, menu_trigger_button, path_trigger_button, menu_items_panel_flex, path_display_panel_flex)
+}
+
+fn initialize_ui_state_and_apply_cli_args(
+    base_path_rc: &Rc<RefCell<Option<String>>>,
+    anime_path_rc: &Rc<RefCell<Option<String>>>,
+    btn_choose_base: &mut Button,
+    btn_choose_anime: &mut Button,
+    file_browser: &mut FileBrowser,
+    search_input: &mut Input,
+) -> (
+    Rc<RefCell<bool>>,
+    Rc<RefCell<bool>>,
+    Rc<RefCell<Option<BgmApi>>>,
+    Rc<RefCell<Option<Ep>>>,
+    Rc<RefCell<Option<String>>>,
+) {
+    let is_menu_expanded = Rc::new(RefCell::new(false));
+    let is_path_panel_expanded = Rc::new(RefCell::new(false));
+    let search_results_rc: Rc<RefCell<Option<BgmApi>>> = Rc::new(RefCell::new(None));
+    let episode_list_rc: Rc<RefCell<Option<Ep>>> = Rc::new(RefCell::new(None));
+    let selected_anime_id_rc: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+
+    if let Some(cli_base_path_str) = base_path_rc.borrow().as_deref() {
+        btn_choose_base.set_label(&shorten_path_for_display(cli_base_path_str, MAX_BUTTON_LABEL_LEN));
+        load_files_to_file_browser(cli_base_path_str, file_browser);
+        if let Some(extracted_anime_name) = extract_anime_name_from_path(cli_base_path_str) {
+            search_input.set_value(&extracted_anime_name);
+            println!("从命令行路径 {} 提取到番剧名: {}", cli_base_path_str, extracted_anime_name);
+        }
+    }
+    if let Some(cli_anime_path_str) = anime_path_rc.borrow().as_deref() {
+        btn_choose_anime.set_label(&shorten_path_for_display(cli_anime_path_str, MAX_BUTTON_LABEL_LEN));
+    }
+
+    (is_menu_expanded, is_path_panel_expanded, search_results_rc, episode_list_rc, selected_anime_id_rc)
+}
+
+#[allow(clippy::too_many_arguments)] // Allow many arguments for this central callback setup function
+fn register_all_callbacks(
+    wind: &mut Window,
+    main_vertical_flex: &mut Flex,
+    menu_trigger_button: &mut Button,
+    is_menu_expanded: Rc<RefCell<bool>>,
+    menu_items_panel_flex: &mut Flex,
+    path_trigger_button: &mut Button,
+    is_path_panel_expanded: Rc<RefCell<bool>>,
+    path_display_panel_flex: &mut Flex,
+    settings_button: &mut Button,
+    unregister_button: &mut Button,
+    about_button: &mut Button,
+    btn_choose_base: &mut Button,
+    base_path_rc: Rc<RefCell<Option<String>>>,
+    file_browser_for_b_cb: FileBrowser,
+    search_input_for_b_cb: Input,
+    btn_choose_anime: &mut Button,
+    anime_path_rc: Rc<RefCell<Option<String>>>,
+    search_input_for_search_cb: &mut Input,
+    search_button: &mut Button,
+    search_results_rc_for_search: Rc<RefCell<Option<BgmApi>>>,
+    search_results_browser_for_search_actions: MultiBrowser, // Renamed parameter for clarity
+    search_results_browser: &mut MultiBrowser,
+    search_results_rc_for_dblclick: Rc<RefCell<Option<BgmApi>>>,
+    episode_list_rc_for_dblclick: Rc<RefCell<Option<Ep>>>,
+    selected_anime_id_rc_for_dblclick: Rc<RefCell<Option<String>>>,
+    file_browser: &mut FileBrowser,
+    btn_done: &mut Button,
+    file_browser_for_done_cb: FileBrowser,
+    episode_list_rc_for_done: Rc<RefCell<Option<Ep>>>,
+    base_path_rc_for_done: Rc<RefCell<Option<String>>>,
+    anime_path_rc_for_done: Rc<RefCell<Option<String>>>,
+    search_results_rc_for_done: Rc<RefCell<Option<BgmApi>>>,
+    selected_anime_id_rc_for_done: Rc<RefCell<Option<String>>>,
+    search_results_browser_for_done_cb: MultiBrowser,
+) {
+    // Menu Toggle Callback
+    let is_menu_expanded_cb = is_menu_expanded.clone();
+    let mut main_flex_cb_menu = main_vertical_flex.clone();
+    let mut menu_panel_cb_menu = menu_items_panel_flex.clone();
+    let mut wind_cb_menu = wind.clone();
+    menu_trigger_button.set_callback(move |_| {
+        handle_menu_toggle(
+            is_menu_expanded_cb.clone(),
+            &mut main_flex_cb_menu,
+            &mut menu_panel_cb_menu,
+            &mut wind_cb_menu,
+        );
+    });
+
+    // Path Panel Toggle Callback
+    let is_path_panel_expanded_cb = is_path_panel_expanded.clone();
+    let mut main_flex_cb_path = main_vertical_flex.clone();
+    let mut path_panel_cb_path = path_display_panel_flex.clone();
+    let mut wind_cb_path = wind.clone();
+    path_trigger_button.set_callback(move |_| {
+        handle_path_panel_toggle(
+            is_path_panel_expanded_cb.clone(),
+            &mut main_flex_cb_path,
+            &mut path_panel_cb_path,
+            &mut wind_cb_path,
+        );
+    });
+
+    // Menu Item Callbacks
+    settings_button.set_callback(|_| handle_register_context_menu());
+    unregister_button.set_callback(|_| handle_unregister_context_menu());
+    about_button.set_callback(|_| handle_about_button());
+
+    // Path Choose Callbacks
+    let base_path_cb_b = base_path_rc.clone();
+    let btn_choose_base_cb_b = btn_choose_base.clone();
+    // file_browser_for_b_cb and search_input_for_b_cb are cloned for the closure
+    btn_choose_base.set_callback(move |_| {
+        handle_choose_base_path_callback(
+            base_path_cb_b.clone(),
+            btn_choose_base_cb_b.clone(),
+            file_browser_for_b_cb.clone(), // Clone Rc/widget for closure
+            search_input_for_b_cb.clone(),  // Clone Rc/widget for closure
+        );
+    });
+
+    let anime_path_cb_a = anime_path_rc.clone();
+    let btn_choose_anime_cb_a = btn_choose_anime.clone();
+    btn_choose_anime.set_callback(move |_| {
+        handle_choose_anime_path_callback(
+            anime_path_cb_a.clone(),
+            btn_choose_anime_cb_a.clone(),
+        );
+    });
+
+    // Search Callbacks
+    let search_input_cb_search_btn = search_input_for_search_cb.clone();
+    let search_results_cb_search_btn = search_results_rc_for_search.clone();
+    // Clone the owned browser for the button callback's closure.
+    // The original `search_results_browser_for_search_actions` will be used by the enter key closure.
+    let srb_for_search_button_closure = search_results_browser_for_search_actions.clone();
+    search_button.set_callback(move |_| {
+        handle_search_button_callback(
+            search_input_cb_search_btn.clone(),
+            search_results_cb_search_btn.clone(),
+            srb_for_search_button_closure.clone(), // Clone the MultiBrowser again for the handler call
+        );
+    });
+
+    let search_input_cb_enter = search_input_for_search_cb.clone();
+    let search_results_cb_enter = search_results_rc_for_search.clone();
+    // The original `search_results_browser_for_search_actions` (owned MultiBrowser parameter) is moved into this closure.
+    search_input_for_search_cb.handle(move |_, ev| {
+        if ev == Event::KeyDown && app::event_key() == Key::Enter {
+            return handle_search_input_enter_key(
+                search_input_cb_enter.clone(),
+                search_results_cb_enter.clone(),
+                search_results_browser_for_search_actions.clone(), // Clone the MultiBrowser again for the handler call
+            );
+        }
+        false
+    });
+
+    // Search Results Browser Callback
+    search_results_browser.set_callback(move |b| {
+        handle_search_results_double_click(
+            b,
+            search_results_rc_for_dblclick.clone(),
+            episode_list_rc_for_dblclick.clone(),
+            selected_anime_id_rc_for_dblclick.clone(),
+        );
+    });
+
+    // File Browser Callback
+    file_browser.handle(move |b, ev| {
+        handle_file_browser_events(b, ev)
+    });
+
+    // Done Button Callback
+    // All necessary Rc and widget clones are passed for the closure
+    btn_done.set_callback(move |_| {
+        handle_done_button_callback(
+            file_browser_for_done_cb.clone(),
+            episode_list_rc_for_done.clone(),
+            base_path_rc_for_done.clone(),
+            anime_path_rc_for_done.clone(),
+            search_results_rc_for_done.clone(),
+            selected_anime_id_rc_for_done.clone(),
+            search_results_browser_for_done_cb.clone(),
+        );
+    });
+}
+
+// --- Data Structures and API Logic (Existing Code) ---
+
 /// 替换文件名中的特殊字符
 pub fn replace_invalid_chars(s: &str) -> String {
     s.replace("/", "／")
@@ -215,6 +551,7 @@ impl Ep {
     }
 }
 
+// --- Constants and Utility Functions (Existing Code) ---
 const WINDOW_WIDTH: i32 = 800;
 const WINDOW_HEIGHT: i32 = 600;
 const HALF_WIDTH: i32 = WINDOW_WIDTH / 2;
@@ -1015,13 +1352,13 @@ fn reset_ui_state_after_operation(
 
 /// 处理“完成”按钮点击事件的回调
 fn handle_done_button_callback(
-    mut file_browser: FileBrowser,
+    file_browser: FileBrowser, // Removed mut
     episode_list_rc: Rc<RefCell<Option<Ep>>>,
     base_path_rc: Rc<RefCell<Option<String>>>,
     anime_path_rc: Rc<RefCell<Option<String>>>,
     search_results_rc: Rc<RefCell<Option<BgmApi>>>,
     selected_anime_id_rc: Rc<RefCell<Option<String>>>,
-    mut search_results_browser: MultiBrowser,
+    search_results_browser: MultiBrowser, // Removed mut
 ) {
     println!("注意: 该程序会自动查找并处理与视频文件对应的字幕文件，保留原有语言标识");
     println!("      支持的字幕格式: .ass, .srt, .ssa, .sub");
@@ -1105,265 +1442,35 @@ fn handle_file_browser_events(
     }
 }
 
-// --- UI 状态结构体 ---
-#[derive(Clone)]
-struct UiState {
-    base_path: Rc<RefCell<String>>,
-    anime_path: Rc<RefCell<String>>,
-    bgm_api: Rc<RefCell<BgmApi>>,
-    selected_bgm_id: Rc<RefCell<Option<String>>>,
-    ep_data: Rc<RefCell<Option<Ep>>>,
-    file_browser: FileBrowser, // 确保这里没有 mut
-    search_results_browser: MultiBrowser, // 确保这里没有 mut
-    path_display_panel_expanded: Rc<RefCell<bool>>,
-    menu_items_panel_expanded: Rc<RefCell<bool>>,
-}
+// --- UI 状态结构体 (Removed as it's no longer used directly in main logic) ---
+// #[derive(Clone)]
+// struct UiState {
+//     base_path: Rc<RefCell<String>>,
+//     anime_path: Rc<RefCell<String>>,
+//     bgm_api: Rc<RefCell<BgmApi>>,
+//     selected_bgm_id: Rc<RefCell<Option<String>>>,
+//     ep_data: Rc<RefCell<Option<Ep>>>,
+//     file_browser: FileBrowser, 
+//     search_results_browser: MultiBrowser, 
+//     path_display_panel_expanded: Rc<RefCell<bool>>,
+//     menu_items_panel_expanded: Rc<RefCell<bool>>,
+// }
 
-impl UiState {
-    fn new(
-        file_browser: FileBrowser, // 确保这里参数没有 mut
-        search_results_browser: MultiBrowser, // 确保这里参数没有 mut
-    ) -> Self {
-        Self {
-            base_path: Rc::new(RefCell::new("".to_string())),
-            anime_path: Rc::new(RefCell::new("".to_string())),
-            bgm_api: Rc::new(RefCell::new(BgmApi::new())),
-            selected_bgm_id: Rc::new(RefCell::new(None)),
-            ep_data: Rc::new(RefCell::new(None)), // 初始化为空
-            file_browser, // 直接使用传入的 browser
-            search_results_browser, // 直接使用传入的 browser
-            path_display_panel_expanded: Rc::new(RefCell::new(false)), // 默认不展开
-            menu_items_panel_expanded: Rc::new(RefCell::new(false)),   // 默认不展开
-        }
-    }
-}
-
-fn main() {
-    let cli_args = CliArgs::parse(); // 解析命令行参数
-
-    let app = app::App::default().with_scheme(app::Scheme::Gtk);
-    let mut wind = Window::new(
-        100,
-        100,
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
-        "BGM Rename Cuby - 番剧文件批量重命名工具"
-    );
-
-    // 使用命令行参数初始化路径 (Rc<RefCell<>> 用于共享可变状态)
-    let base_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(cli_args.base_path.clone()));
-    let anime_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(cli_args.anime_path.clone()));
-
-    // --- 提前定义需要在多个Flex容器中共享或提前配置的UI控件 ---
-    let mut btn_choose_base = Button::new(0, 0, 0, 0, "选择源路径 (B)");
-    btn_choose_base.set_tooltip("选择包含视频文件的源文件夹 (B)");
-    let mut btn_choose_anime = Button::new(0, 0, 0, 0, "选择目标路径 (A)");
-    btn_choose_anime.set_tooltip("选择重命名后文件存放的目标文件夹 (A)");
-    let mut btn_done = Button::new(0, 0, 0, 0, "✔️ 完成");
-    btn_done.set_tooltip("开始重命名操作");
-
-    let mut search_input = Input::new(0, 0, 0, 0, "");
-    search_input.set_tooltip("输入番剧名称关键字进行搜索");
-    let mut search_button = Button::new(0, 0, 40, 0, "🔎");
-    search_button.set_tooltip("点击搜索");
-    
-    // --- 主垂直Flex布局容器 ---
-    let mut main_vertical_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
-    main_vertical_flex.set_type(fltk::group::FlexType::Column); // 垂直排列子元素
-
-    // --- 创建并添加顶部触发器栏 (菜单按钮、路径按钮、搜索区) ---
-    let (
-        mut menu_trigger_button, // 从 setup 函数获取按钮实例
-        mut path_trigger_button, // 从 setup 函数获取按钮实例
-        top_triggers_flex
-    ) = setup_top_triggers_flex(&btn_done, &search_input, &search_button);
-    main_vertical_flex.add(&top_triggers_flex);
-    main_vertical_flex.fixed(&top_triggers_flex, MENU_TRIGGER_HEIGHT); // 固定高度
-
-    // --- 创建并添加可展开的菜单项面板 ---
-    let mut settings_button = Button::new(0, 0, 0, 30, "📝 注册");
-    settings_button.set_tooltip("注册右键菜单到系统");
-    let mut unregister_button = Button::new(0, 0, 0, 30, "🗑️ 注销");
-    unregister_button.set_tooltip("从系统注销右键菜单");
-    let mut about_button = Button::new(0, 0, 0, 30, "📦 关于");
-    about_button.set_tooltip("查看项目信息");
-    let menu_items_panel_flex = setup_menu_items_panel(&settings_button, &unregister_button, &about_button);
-    main_vertical_flex.add(&menu_items_panel_flex); // 添加到主布局，初始高度为0 (隐藏)
-
-    // --- 创建并添加可折叠的路径显示/选择面板 ---
-    let path_display_panel_flex = setup_path_display_panel(&btn_choose_base, &btn_choose_anime);
-    main_vertical_flex.add(&path_display_panel_flex); // 添加到主布局，初始高度为0 (隐藏)
-    
-    // --- 创建并添加主内容区域 (文件浏览器和搜索结果浏览器) ---
-    let (content_flex, mut left_flex, mut right_flex) = setup_content_area();
-    
-    // 初始化文件浏览器 (左侧)
-    let mut file_browser = FileBrowser::new(0, 0, 0, 0, "");
-    file_browser.set_tooltip("源文件夹中的文件列表");
-    file_browser.set_selection_color(Color::Yellow);
-    file_browser.set_type(fltk::browser::BrowserType::Hold); // 单选模式
-    file_browser.set_damage(true); // 确保重绘
-    left_flex.add(&file_browser); // 将文件浏览器添加到左侧Flex
-
-    // 初始化搜索结果浏览器 (右侧)
-    let mut search_results_browser = MultiBrowser::new(0, 0, 0, 0, "");
-    search_results_browser.set_tooltip("Bangumi API 搜索结果");
-    search_results_browser.set_selection_color(Color::Yellow);
-    search_results_browser.set_type(fltk::browser::BrowserType::Hold); // 单选模式
-    right_flex.add(&search_results_browser); // 将搜索结果浏览器添加到右侧Flex
-
-    main_vertical_flex.add(&content_flex); // 内容区域将填充剩余空间
-    main_vertical_flex.end();
-    
-    wind.add(&main_vertical_flex);
-    wind.resizable(&main_vertical_flex);
-    wind.end();
-    wind.show();
-
-    // --- 状态变量 ---
-    let is_menu_expanded = Rc::new(RefCell::new(false)); // 菜单面板是否展开
-    let is_path_panel_expanded = Rc::new(RefCell::new(false)); // 路径面板是否展开
-
-    // --- 如果通过命令行参数设置了路径，则更新UI并加载文件 ---
-    if let Some(cli_base_path_str) = base_path.borrow().as_deref() {
-        btn_choose_base.set_label(&shorten_path_for_display(cli_base_path_str, MAX_BUTTON_LABEL_LEN));
-        load_files_to_file_browser(cli_base_path_str, &mut file_browser);
-        if let Some(extracted_anime_name) = extract_anime_name_from_path(cli_base_path_str) {
-            search_input.set_value(&extracted_anime_name);
-            println!("从命令行路径 {} 提取到番剧名: {}", cli_base_path_str, extracted_anime_name);
-        }
-    }
-    if let Some(cli_anime_path_str) = anime_path.borrow().as_deref() {
-        btn_choose_anime.set_label(&shorten_path_for_display(cli_anime_path_str, MAX_BUTTON_LABEL_LEN));
-    }
-
-    // --- 设置菜单栏按钮的回调 ---
-    let is_menu_expanded_cb = is_menu_expanded.clone();
-    let mut main_vertical_flex_cb_menu = main_vertical_flex.clone();
-    let mut menu_items_panel_flex_cb_menu = menu_items_panel_flex.clone();
-    let mut wind_cb_menu = wind.clone();
-    menu_trigger_button.set_callback(move |_| {
-        handle_menu_toggle(
-            is_menu_expanded_cb.clone(),
-            &mut main_vertical_flex_cb_menu,
-            &mut menu_items_panel_flex_cb_menu,
-            &mut wind_cb_menu,
-        );
-    });
-
-    // --- 设置路径栏按钮的回调 ---
-    let is_path_panel_expanded_cb = is_path_panel_expanded.clone();
-    let mut main_vertical_flex_cb_path = main_vertical_flex.clone();
-    let mut path_display_panel_flex_cb_path = path_display_panel_flex.clone();
-    let mut wind_cb_path = wind.clone();
-    path_trigger_button.set_callback(move |_| {
-        handle_path_panel_toggle(
-            is_path_panel_expanded_cb.clone(),
-            &mut main_vertical_flex_cb_path,
-            &mut path_display_panel_flex_cb_path,
-            &mut wind_cb_path,
-        );
-    });
-    
-    // --- 设置菜单项按钮的回调 (已提取到独立函数) ---
-    settings_button.set_callback(|_| handle_register_context_menu());
-    unregister_button.set_callback(|_| handle_unregister_context_menu());
-    about_button.set_callback(|_| handle_about_button());
-
-    // --- 共享数据状态 ---
-    let search_results: Rc<RefCell<Option<BgmApi>>> = Rc::new(RefCell::new(None)); // 存储BGM API搜索结果
-    let episode_list: Rc<RefCell<Option<Ep>>> = Rc::new(RefCell::new(None));       // 存储选定番剧的剧集列表
-    let selected_anime_id: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None)); // 存储当前选中的番剧ID
-
-    // --- 设置路径选择按钮 (B和A) 的回调 ---
-    let base_path_cb_b = base_path.clone();
-    let btn_choose_base_cb_b = btn_choose_base.clone();
-    let file_browser_cb_b = file_browser.clone();
-    let search_input_cb_b = search_input.clone();
-    btn_choose_base.set_callback(move |_| {
-        handle_choose_base_path_callback(
-            base_path_cb_b.clone(),
-            btn_choose_base_cb_b.clone(),
-            file_browser_cb_b.clone(),
-            search_input_cb_b.clone(),
-        );
-    });
-
-    let anime_path_cb_a = anime_path.clone();
-    let btn_choose_anime_cb_a = btn_choose_anime.clone();
-    btn_choose_anime.set_callback(move |_| {
-        handle_choose_anime_path_callback(
-            anime_path_cb_a.clone(),
-            btn_choose_anime_cb_a.clone(),
-        );
-    });
-    
-    // --- 设置搜索相关控件的回调 ---
-    let search_input_cb_search = search_input.clone();
-    let search_results_cb_search = search_results.clone();
-    let search_results_browser_cb_search = search_results_browser.clone();
-    search_button.set_callback(move |_| {
-        handle_search_button_callback(
-            search_input_cb_search.clone(),
-            search_results_cb_search.clone(),
-            search_results_browser_cb_search.clone(),
-        );
-    });
-
-    let search_input_cb_enter = search_input.clone();
-    let search_results_cb_enter = search_results.clone();
-    let search_results_browser_cb_enter = search_results_browser.clone();
-    search_input.handle(move |_, ev| { // 处理回车键
-        if ev == Event::KeyDown && app::event_key() == Key::Enter {
-            return handle_search_input_enter_key(
-                search_input_cb_enter.clone(),
-                search_results_cb_enter.clone(),
-                search_results_browser_cb_enter.clone(),
-            );
-        }
-        false
-    });
-
-    let search_results_cb_dblclick = search_results.clone();
-    let episode_list_cb_dblclick = episode_list.clone();
-    let selected_anime_id_cb_dblclick = selected_anime_id.clone();
-    search_results_browser.set_callback(move |b| { // b 是 MultiBrowser 本身
-        handle_search_results_double_click(
-            b,
-            search_results_cb_dblclick.clone(),
-            episode_list_cb_dblclick.clone(),
-            selected_anime_id_cb_dblclick.clone(),
-        );
-    });
-    
-    // --- 设置文件浏览器事件处理回调 ---
-    // 更新了回调的签名，移除了未使用的 dragged_line_idx_rc 和 marked_line_idx_rc
-    file_browser.handle(move |b, ev| {
-        handle_file_browser_events(
-            b,
-            ev,
-        )
-    });
-    
-    // --- 设置"完成"按钮的回调 ---
-    let file_browser_cb_done = file_browser.clone();
-    let episode_list_cb_done = episode_list.clone();
-    let base_path_cb_done = base_path.clone();
-    let anime_path_cb_done = anime_path.clone();
-    let search_results_cb_done = search_results.clone();
-    let selected_anime_id_cb_done = selected_anime_id.clone();
-    let search_results_browser_cb_done = search_results_browser.clone();
-    btn_done.set_callback(move |_| {
-        handle_done_button_callback(
-            file_browser_cb_done.clone(),
-            episode_list_cb_done.clone(),
-            base_path_cb_done.clone(),
-            anime_path_cb_done.clone(),
-            search_results_cb_done.clone(),
-            selected_anime_id_cb_done.clone(),
-            search_results_browser_cb_done.clone(),
-        );
-    });
-
-    app.run().unwrap(); // 启动 FLTK 事件循环
-}
+// impl UiState {
+//     fn new(
+//         file_browser: FileBrowser, 
+//         search_results_browser: MultiBrowser, 
+//     ) -> Self {
+//         Self {
+//             base_path: Rc::new(RefCell::new("".to_string())),
+//             anime_path: Rc::new(RefCell::new("".to_string())),
+//             bgm_api: Rc::new(RefCell::new(BgmApi::new())),
+//             selected_bgm_id: Rc::new(RefCell::new(None)),
+//             ep_data: Rc::new(RefCell::new(None)), // 初始化为空
+//             file_browser, 
+//             search_results_browser, 
+//             path_display_panel_expanded: Rc::new(RefCell::new(false)), // 默认不展开
+//             menu_items_panel_expanded: Rc::new(RefCell::new(false)),   // 默认不展开
+//         }
+//     }
+// }
