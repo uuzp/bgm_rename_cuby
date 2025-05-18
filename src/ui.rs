@@ -515,7 +515,7 @@ fn register_search_callbacks(
     let search_results_rc_clone_btn = search_results_rc.clone();
     let srb_clone_btn = search_results_browser.clone();
     search_button.set_callback(move |_| {
-        ui_core::handle_search_button_callback(
+        ui_core::handle_search( // <--- 修改此处
             search_input_clone_btn.clone(),
             search_results_rc_clone_btn.clone(),
             srb_clone_btn.clone(),
@@ -528,11 +528,12 @@ fn register_search_callbacks(
     let srb_clone_enter = search_results_browser.clone();
     search_input.handle(move |_, ev| {
         if ev == Event::KeyDown && app::event_key() == Key::Enter {
-            return ui_core::handle_search_input_enter_key(
+            ui_core::handle_search( // <--- 修改此处
                 search_input_clone_enter.clone(),
                 search_results_rc_clone_enter.clone(),
                 srb_clone_enter.clone(),
             );
+            return true; // <--- 确保返回 true
         }
         false
     });
