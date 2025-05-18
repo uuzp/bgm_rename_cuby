@@ -23,129 +23,6 @@ use crate::ui_core;
 use crate::CliArgs;
 use crate::{MAX_BUTTON_LABEL_LEN, WINDOW_WIDTH, WINDOW_HEIGHT, HALF_WIDTH, MENU_TRIGGER_HEIGHT};
 
-/// 创建主窗口
-pub fn create_main_window() -> Window {
-    Window::new(
-        100,
-        100,
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
-        "BGM Rename Cuby - 番剧文件批量重命名工具",
-    )
-}
-
-/// 创建UI并返回主窗口
-pub fn create_ui(cli_args: &CliArgs) -> Window {
-    let mut main_window = create_main_window();
-    
-    // 初始化UI并获取所有组件和状态
-    let (_base_path_rc, _anime_path_rc, _file_browser, _search_results_browser, _controls, _ui_state) = 
-        initialize_ui(cli_args, &mut main_window);
-        
-    // 设置窗口关闭回调
-    main_window.set_callback(|_| {
-        if app::event() == Event::Close {
-            app::quit();
-        }
-    });
-    
-    main_window
-}
-
-/// 完整初始化UI并返回所有必要的组件和状态
-pub fn initialize_ui(cli_args: &crate::CliArgs, wind: &mut Window) -> (
-    Rc<RefCell<Option<String>>>, // base_path_rc
-    Rc<RefCell<Option<String>>>, // anime_path_rc
-    FileBrowser,                // file_browser
-    MultiBrowser,               // search_results_browser
-    UIControls,                 // 控件集合
-    UIState,                    // UI状态
-) {
-    // 从命令行参数初始化路径
-    let (base_path_rc, anime_path_rc) = initialize_paths_from_cli(cli_args);
-    
-    // 创建核心控件
-    let (mut btn_choose_base, mut btn_choose_anime, mut btn_done, mut search_input, mut search_button) = 
-        ui_core::create_core_controls();
-    let (mut settings_button, mut unregister_button, mut about_button) = 
-        ui_core::create_menu_buttons();
-    let (mut file_browser, mut search_results_browser) = 
-        ui_core::create_main_browsers();
-    
-    // 构建UI布局
-    let (
-        mut main_vertical_flex,
-        mut menu_trigger_button,
-        mut path_trigger_button,
-        mut menu_items_panel_flex,
-        mut path_display_panel_flex,
-    ) = build_ui_layout(
-        wind,
-        &btn_choose_base, &btn_choose_anime, &btn_done, &search_input, &search_button,
-        &settings_button, &unregister_button, &about_button,
-        &mut file_browser, &mut search_results_browser,
-    );
-    
-    // 初始化UI状态并应用命令行参数
-    let (is_menu_expanded, is_path_panel_expanded, search_results_rc, episode_list_rc, selected_anime_id_rc) =
-        initialize_ui_state_and_apply_cli_args(
-            &base_path_rc, &anime_path_rc,
-            &mut btn_choose_base, &mut btn_choose_anime,
-            &mut file_browser, &mut search_input,
-        );
-    
-    // 为回调准备克隆
-    let file_browser_clone_for_base_cb = file_browser.clone();
-    let search_input_clone_for_base_cb = search_input.clone();
-    let search_results_browser_clone_for_search_actions = search_results_browser.clone();
-    let file_browser_clone_for_done_cb = file_browser.clone();
-    let search_results_browser_clone_for_done_cb = search_results_browser.clone();
-    
-    // 注册所有回调
-    register_all_callbacks(
-        wind,
-        &mut main_vertical_flex,
-        &mut menu_trigger_button, is_menu_expanded.clone(), &mut menu_items_panel_flex,
-        &mut path_trigger_button, is_path_panel_expanded.clone(), &mut path_display_panel_flex,
-        &mut settings_button, &mut unregister_button, &mut about_button,
-        &mut btn_choose_base, base_path_rc.clone(), file_browser_clone_for_base_cb, search_input_clone_for_base_cb,
-        &mut btn_choose_anime, anime_path_rc.clone(),
-        &mut search_input, &mut search_button, search_results_rc.clone(), search_results_browser_clone_for_search_actions,
-        &mut search_results_browser, search_results_rc.clone(), episode_list_rc.clone(), selected_anime_id_rc.clone(),
-        &mut file_browser,
-        &mut btn_done, file_browser_clone_for_done_cb, episode_list_rc.clone(), base_path_rc.clone(), anime_path_rc.clone(),
-        search_results_rc.clone(), selected_anime_id_rc.clone(), search_results_browser_clone_for_done_cb,
-    );
-
-    // 创建UI控件集合结构体
-    let controls = UIControls {
-        main_vertical_flex,
-        menu_trigger_button,
-        path_trigger_button,
-        menu_items_panel_flex,
-        path_display_panel_flex,
-        btn_choose_base,
-        btn_choose_anime,
-        btn_done,
-        search_input,
-        search_button,
-        settings_button,
-        unregister_button,
-        about_button,
-    };
-
-    // 创建UI状态结构体
-    let ui_state = UIState {
-        is_menu_expanded,
-        is_path_panel_expanded,
-        search_results_rc,
-        episode_list_rc,
-        selected_anime_id_rc,
-    };
-    
-    (base_path_rc, anime_path_rc, file_browser, search_results_browser, controls, ui_state)
-}
-
 /// UI控件集合结构体
 #[allow(dead_code)]
 pub struct UIControls {
@@ -171,7 +48,46 @@ pub struct UIState {
     pub is_path_panel_expanded: Rc<RefCell<bool>>,
     pub search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
     pub episode_list_rc: Rc<RefCell<Option<api::EpisodeCollection>>>,
+
     pub selected_anime_id_rc: Rc<RefCell<Option<String>>>,
+}
+
+/// 创建主窗口
+fn init_window() -> Window {
+    Window::new(
+        100,
+        100,
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+        "Cuby",
+    )
+}
+
+/// UI组件集合结构体，封装从initialize_ui函数返回的所有组件
+pub struct UIComponents {
+    pub base_path_rc: Rc<RefCell<Option<String>>>, // base_path_rc
+    pub anime_path_rc: Rc<RefCell<Option<String>>>, // anime_path_rc
+    pub file_browser: FileBrowser,                // file_browser
+    pub search_results_browser: MultiBrowser,               // search_results_browser
+    pub controls: UIControls,                 // 控件集合
+    pub state: UIState,                    // UI状态
+}
+
+/// 创建UI并返回主窗口
+pub fn init_ui(cli_args: &CliArgs) -> Window {
+    let mut main_window = init_window();
+    
+    // 初始化UI并获取所有组件和状态
+    let _ui_components = initialize_ui(cli_args, &mut main_window);
+        
+    // 设置窗口关闭回调
+    main_window.set_callback(|_| {
+        if app::event() == Event::Close {
+            app::quit();
+        }
+    });
+    
+    main_window
 }
 
 /// 从命令行参数初始化路径
@@ -180,6 +96,171 @@ pub fn initialize_paths_from_cli(cli_args: &crate::CliArgs) -> (Rc<RefCell<Optio
         Rc::new(RefCell::new(cli_args.base_path.clone())),
         Rc::new(RefCell::new(cli_args.anime_path.clone())),
     )
+}
+
+/// 完整初始化UI并返回所有必要的组件和状态
+fn initialize_ui(cli_args: &crate::CliArgs, wind: &mut Window) -> UIComponents {
+    // 从命令行参数初始化路径
+    let (base_path_rc, anime_path_rc) = initialize_paths_from_cli(cli_args);
+    
+    // 创建所有UI控件
+    let (mut controls, file_browser, search_results_browser) = create_ui_controls(wind);
+    
+    // 初始化UI状态并应用命令行参数
+    let ui_state = initialize_ui_state(
+        &base_path_rc, 
+        &anime_path_rc, 
+        &mut controls.btn_choose_base, 
+        &mut controls.btn_choose_anime,
+        &file_browser, 
+        &mut controls.search_input
+    );
+    
+    // 设置所有回调
+    register_callbacks(
+        wind,
+        &controls,
+        &ui_state,
+        &base_path_rc, 
+        &anime_path_rc,
+        &file_browser,
+        &search_results_browser
+    );
+    
+    // 返回组合到一起的UI组件
+    UIComponents {
+        base_path_rc,
+        anime_path_rc,
+        file_browser,
+        search_results_browser,
+        controls,
+        state: ui_state,
+    }
+}
+
+/// 创建所有UI控件
+fn create_ui_controls(wind: &mut Window) -> (UIControls, FileBrowser, MultiBrowser) {
+    // 创建核心控件
+    let (mut btn_choose_base, mut btn_choose_anime, mut btn_done, mut search_input, mut search_button) = 
+        ui_core::create_core_controls();
+    let (mut settings_button, mut unregister_button, mut about_button) = 
+        ui_core::create_menu_buttons();
+    let (mut file_browser, mut search_results_browser) = 
+        ui_core::create_main_browsers();
+    
+    // 构建UI布局
+    let (
+        mut main_vertical_flex,
+        mut menu_trigger_button,
+        mut path_trigger_button,
+        mut menu_items_panel_flex,
+        mut path_display_panel_flex,
+    ) = build_ui_layout(
+        wind,
+        &btn_choose_base, &btn_choose_anime, &btn_done, &search_input, &search_button,
+        &settings_button, &unregister_button, &about_button,
+        &mut file_browser, &mut search_results_browser,
+    );
+    
+    // 创建UI控件集合结构体
+    let controls = UIControls {
+        main_vertical_flex,
+        menu_trigger_button,
+        path_trigger_button,
+        menu_items_panel_flex,
+        path_display_panel_flex,
+        btn_choose_base,
+        btn_choose_anime,
+        btn_done,
+        search_input,
+        search_button,
+        settings_button,
+        unregister_button,
+        about_button,
+    };
+    
+    (controls, file_browser, search_results_browser)
+}
+
+/// 初始化UI状态并应用命令行参数
+fn initialize_ui_state(
+    base_path_rc: &Rc<RefCell<Option<String>>>,
+    anime_path_rc: &Rc<RefCell<Option<String>>>,
+    btn_choose_base: &mut Button,
+    btn_choose_anime: &mut Button,
+    file_browser: &FileBrowser,
+    search_input: &mut Input,
+) -> UIState {
+    let (is_menu_expanded, is_path_panel_expanded, search_results_rc, episode_list_rc, selected_anime_id_rc) =
+        initialize_ui_state_and_apply_cli_args(
+            base_path_rc, anime_path_rc,
+            btn_choose_base, btn_choose_anime,
+            &mut file_browser.clone(), search_input,
+        );
+    
+    // 创建UI状态结构体
+    UIState {
+        is_menu_expanded,
+        is_path_panel_expanded,
+        search_results_rc,
+        episode_list_rc,
+        selected_anime_id_rc,
+    }
+}
+
+/// 注册所有回调
+fn register_callbacks(
+    wind: &mut Window,
+    controls: &UIControls,
+    ui_state: &UIState,
+    base_path_rc: &Rc<RefCell<Option<String>>>,
+    anime_path_rc: &Rc<RefCell<Option<String>>>,
+    file_browser: &FileBrowser,
+    search_results_browser: &MultiBrowser,
+) {
+    // 为回调准备克隆
+    let file_browser_clone_for_base_cb = file_browser.clone();
+    let search_input_clone_for_base_cb = controls.search_input.clone();
+    let search_results_browser_clone = search_results_browser.clone();
+    let file_browser_clone_for_done_cb = file_browser.clone();
+    let search_results_browser_clone_for_done = search_results_browser.clone();
+    
+    register_all_callbacks(
+        wind,
+        &mut controls.main_vertical_flex.clone(),
+        &mut controls.menu_trigger_button.clone(), 
+        ui_state.is_menu_expanded.clone(), 
+        &mut controls.menu_items_panel_flex.clone(),
+        &mut controls.path_trigger_button.clone(), 
+        ui_state.is_path_panel_expanded.clone(), 
+        &mut controls.path_display_panel_flex.clone(),
+        &mut controls.settings_button.clone(),
+        &mut controls.unregister_button.clone(), 
+        &mut controls.about_button.clone(),
+        &mut controls.btn_choose_base.clone(), 
+        base_path_rc.clone(), 
+        file_browser_clone_for_base_cb, 
+        search_input_clone_for_base_cb,
+        &mut controls.btn_choose_anime.clone(), 
+        anime_path_rc.clone(),
+        &mut controls.search_input.clone(), 
+        &mut controls.search_button.clone(), 
+        ui_state.search_results_rc.clone(), 
+        search_results_browser_clone,
+        &mut search_results_browser.clone(), 
+        ui_state.search_results_rc.clone(), 
+        ui_state.episode_list_rc.clone(), 
+        ui_state.selected_anime_id_rc.clone(),
+        &mut file_browser.clone(),
+        &mut controls.btn_done.clone(), 
+        file_browser_clone_for_done_cb, 
+        ui_state.episode_list_rc.clone(), 
+        base_path_rc.clone(), 
+        anime_path_rc.clone(),
+        ui_state.search_results_rc.clone(), 
+        ui_state.selected_anime_id_rc.clone(), 
+        search_results_browser_clone_for_done,
+    );
 }
 
 /// 构建UI布局
@@ -230,6 +311,7 @@ pub fn initialize_ui_state_and_apply_cli_args(
     Rc<RefCell<bool>>,
     Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
     Rc<RefCell<Option<api::EpisodeCollection>>>,
+
     Rc<RefCell<Option<String>>>,
 ) {
     let is_menu_expanded = Rc::new(RefCell::new(false));

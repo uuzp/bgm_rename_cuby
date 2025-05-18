@@ -15,13 +15,20 @@ use fltk::{
 use clap::Parser;
 
 // --- 常量 ---
+// 窗口宽度
 pub const WINDOW_WIDTH: i32 = 800;
+// 窗口高度
 pub const WINDOW_HEIGHT: i32 = 600;
+// 窗口宽度的一半
 pub const HALF_WIDTH: i32 = WINDOW_WIDTH / 2;
-pub const MENU_TRIGGER_HEIGHT: i32 = 30; // 菜单触发器行高度
-pub const MENU_ITEMS_PANEL_EXPANDED_HEIGHT: i32 = 35; // 菜单项面板展开高度
-pub const PATH_DISPLAY_PANEL_EXPANDED_HEIGHT: i32 = 30; // 路径显示面板展开高度
-pub const MAX_BUTTON_LABEL_LEN: usize = 20; // 按钮标签最大显示字符数（粗略）
+// 菜单触发器行高度
+pub const MENU_TRIGGER_HEIGHT: i32 = 30; 
+// 菜单项面板展开高度
+pub const MENU_ITEMS_PANEL_EXPANDED_HEIGHT: i32 = 30; 
+// 路径显示面板展开高度
+pub const PATH_DISPLAY_PANEL_EXPANDED_HEIGHT: i32 = 30; 
+// 按钮标签最大显示字符数（粗略）
+pub const MAX_BUTTON_LABEL_LEN: usize = 30; // 按钮标签最大显示字符数（粗略）
 
 // --- 命令行参数定义 ---
 #[derive(Parser, Debug, Clone)]
@@ -45,7 +52,7 @@ fn main() {
     let app = app::App::default().with_scheme(app::Scheme::Gtk);
     
     // 创建并初始化UI
-    let mut main_window = ui::create_ui(&cli_args);
+    let mut main_window = ui::init_ui(&cli_args);
     
     // 显示窗口并运行应用
     main_window.show();
