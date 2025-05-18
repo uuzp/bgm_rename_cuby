@@ -66,22 +66,12 @@ fn init_window() -> Window {
     )
 }
 
-/// UI组件集合结构体，封装从initialize_ui函数返回的所有组件
-pub struct UIComponents {
-    pub base_path_rc: Rc<RefCell<Option<String>>>, // base_path_rc
-    pub anime_path_rc: Rc<RefCell<Option<String>>>, // anime_path_rc
-    pub file_browser: FileBrowser,                // file_browser
-    pub search_results_browser: MultiBrowser,               // search_results_browser
-    pub controls: UIControls,                 // 控件集合
-    pub state: UIState,                    // UI状态
-}
-
 /// 创建UI并返回主窗口
 pub fn init_ui(cli_args: &CliArgs) -> Window {
     let mut main_window = init_window();
     
     // 初始化UI并获取所有组件和状态
-    let _ui_components = initialize_ui(cli_args, &mut main_window);
+    initialize_ui(cli_args, &mut main_window);
         
     // 设置窗口关闭回调
     main_window.set_callback(|_| {
@@ -102,7 +92,7 @@ pub fn initialize_paths_from_cli(cli_args: &crate::CliArgs) -> (Rc<RefCell<Optio
 }
 
 /// 完整初始化UI并返回所有必要的组件和状态
-fn initialize_ui(cli_args: &crate::CliArgs, wind: &mut Window) -> UIComponents {
+fn initialize_ui(cli_args: &crate::CliArgs, wind: &mut Window){
     // 从命令行参数初始化路径
     let (base_path_rc, anime_path_rc) = initialize_paths_from_cli(cli_args);
     
@@ -130,15 +120,6 @@ fn initialize_ui(cli_args: &crate::CliArgs, wind: &mut Window) -> UIComponents {
         &mut search_results_browser // 传递可变引用
     );
     
-    // 返回组合到一起的UI组件
-    UIComponents {
-        base_path_rc,
-        anime_path_rc,
-        file_browser,
-        search_results_browser,
-        controls,
-        state: ui_state,
-    }
 }
 /// 注册所有回调的总入口函数
 fn register_callbacks(
