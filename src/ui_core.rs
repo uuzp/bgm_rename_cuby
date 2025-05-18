@@ -783,4 +783,3 @@ pub fn register_search_results_browser_callback(
         );
     });
 }
-

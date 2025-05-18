@@ -5,7 +5,6 @@ mod bangumi_api;
 mod io;
 mod ui;
 mod ui_core;
-mod ui_reg_callbacks;
 
 // --- 使用声明 ---
 use fltk::{
