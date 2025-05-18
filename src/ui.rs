@@ -42,6 +42,7 @@ pub struct UIControls {
     pub settings_button: Button,
     pub unregister_button: Button,
     pub about_button: Button,
+    pub info_frame: Frame,  // 新增的info_frame字段
 }
 
 /// UI状态结构体
@@ -170,6 +171,9 @@ fn register_callbacks(
         &ui_state.search_results_rc,
         &ui_state.episode_list_rc,
         &ui_state.selected_anime_id_rc,
+        &mut controls.info_frame,  // 传递info_frame
+        base_path_rc,  // 传递base_path_rc
+        anime_path_rc,  // 传递anime_path_rc
     );
 
     register_done_button_callback(
@@ -200,6 +204,7 @@ fn create_ui_controls(wind: &mut Window) -> (UIControls, FileBrowser, MultiBrows
         path_trigger_button,
         menu_items_panel_flex,
         path_display_panel_flex,
+        info_frame,  // 接收info_frame
     ) = build_ui_layout(
         wind,
         &btn_choose_base, &btn_choose_anime, &btn_done, &search_input, &search_button,
@@ -222,6 +227,7 @@ fn create_ui_controls(wind: &mut Window) -> (UIControls, FileBrowser, MultiBrows
         settings_button,
         unregister_button,
         about_button,
+        info_frame,  // 添加info_frame到结构体
     };
     
     (controls, file_browser, search_results_browser)
@@ -278,14 +284,14 @@ fn build_ui_layout(
     about_button: &Button,
     file_browser: &mut FileBrowser, 
     search_results_browser: &mut MultiBrowser,
-) -> (Flex, Button, Button, Flex, Flex) {
+) -> (Flex, Button, Button, Flex, Flex, Frame) {  // 修改返回类型添加Frame
     // 创建主垂直Flex布局
     let mut main_vertical_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
     main_vertical_flex.set_type(fltk::group::FlexType::Column);
     
-    // 设置顶部触发器布局
+    // 设置顶部触发器布局 - 移除btn_done参数
     let (menu_trigger_button, path_trigger_button, top_triggers_flex) = 
-        setup_top_triggers_flex(btn_done, search_input, search_button);
+        setup_top_triggers_flex(search_input, search_button);
     main_vertical_flex.add(&top_triggers_flex);
     main_vertical_flex.fixed(&top_triggers_flex, MENU_TRIGGER_HEIGHT);
     
@@ -308,6 +314,16 @@ fn build_ui_layout(
     
     main_vertical_flex.add(&content_flex);
     
+    // 创建信息框
+    let mut info_frame = Frame::new(0, 0, WINDOW_WIDTH, 25, "");
+    info_frame.set_label_size(12);
+    info_frame.set_align(fltk::enums::Align::Left | fltk::enums::Align::Inside);
+    
+    // 使用底部面板布局，将info_frame和btn_done放在同一行
+    let bottom_panel = setup_bottom_panel(&info_frame, btn_done);
+    main_vertical_flex.add(&bottom_panel);
+    main_vertical_flex.fixed(&bottom_panel, 25);
+    
     main_vertical_flex.end();
     wind.resizable(&main_vertical_flex); // 使窗口可调整大小，并让 main_vertical_flex 填充
     wind.end();
@@ -318,13 +334,14 @@ fn build_ui_layout(
         path_trigger_button,
         menu_items_panel_flex,
         path_display_panel_flex,
+        info_frame,  // 添加info_frame到返回值中
     )
 }
 
 // --- UI 元素布局函数 ---
 
 /// 设置顶部触发器布局
-fn setup_top_triggers_flex(btn_done: &Button, search_input: &Input, search_button: &Button) -> (Button, Button, Flex) {
+fn setup_top_triggers_flex(search_input: &Input, search_button: &Button) -> (Button, Button, Flex) {
     let mut top_triggers_flex = Flex::new(0, 0, WINDOW_WIDTH, MENU_TRIGGER_HEIGHT, "");
     top_triggers_flex.set_type(fltk::group::FlexType::Row);
     let mut menu_trigger_button = Button::new(0, 0, 80, 0, "菜单 ☰");
@@ -337,8 +354,7 @@ fn setup_top_triggers_flex(btn_done: &Button, search_input: &Input, search_butto
     top_triggers_flex.fixed(&path_trigger_button, 80);
     let top_spacer = Frame::new(0,0,0,0,"");
     top_triggers_flex.add(&top_spacer);
-    top_triggers_flex.add(btn_done);
-    top_triggers_flex.fixed(btn_done, 80);
+    // 移除btn_done
     let search_gap_spacer = Frame::new(0,0,10,0,"");
     top_triggers_flex.add(&search_gap_spacer);
     top_triggers_flex.fixed(&search_gap_spacer, 10);
@@ -347,6 +363,19 @@ fn setup_top_triggers_flex(btn_done: &Button, search_input: &Input, search_butto
     top_triggers_flex.fixed(search_button, 40);
     top_triggers_flex.end();
     (menu_trigger_button, path_trigger_button, top_triggers_flex)
+}
+
+/// 设置底部面板布局
+fn setup_bottom_panel(info_frame: &Frame, btn_done: &Button) -> Flex {
+    let mut bottom_panel_flex = Flex::new(0, 0, WINDOW_WIDTH, 25, "");
+    bottom_panel_flex.set_type(fltk::group::FlexType::Row);
+    bottom_panel_flex.add(info_frame);
+    let spacer = Frame::new(0, 0, 0, 0, "");
+    bottom_panel_flex.add(&spacer);
+    bottom_panel_flex.add(btn_done);
+    bottom_panel_flex.fixed(btn_done, 80);
+    bottom_panel_flex.end();
+    bottom_panel_flex
 }
 
 /// 设置菜单项面板
@@ -527,12 +556,26 @@ fn register_browser_event_callbacks(
     search_results_rc: &Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
     episode_list_rc: &Rc<RefCell<Option<api::EpisodeCollection>>>,
     selected_anime_id_rc: &Rc<RefCell<Option<String>>>,
+    info_frame: &mut Frame,  // 添加info_frame参数
+    base_path_rc: &Rc<RefCell<Option<String>>>,  // 添加base_path_rc
+    anime_path_rc: &Rc<RefCell<Option<String>>>,  // 添加anime_path_rc
 ) {
     // 搜索结果浏览器双击回调
     let search_results_rc_clone = search_results_rc.clone();
     let episode_list_rc_clone = episode_list_rc.clone();
     let selected_anime_id_rc_clone = selected_anime_id_rc.clone();
+    let mut info_frame_clone = info_frame.clone();
+    let base_path_rc_clone = base_path_rc.clone();
+    let anime_path_rc_clone = anime_path_rc.clone();
+    
     search_results_browser.set_callback(move |b| {
+        // 更新info_frame显示anime_path
+        if let Some(path) = anime_path_rc_clone.borrow().clone() {
+            info_frame_clone.set_label(&format!("番剧路径: {}", path));
+        } else {
+            info_frame_clone.set_label("番剧路径: 未选择");
+        }
+        
         ui_core::handle_search_results_double_click(
             b,
             search_results_rc_clone.clone(),
@@ -542,7 +585,19 @@ fn register_browser_event_callbacks(
     });
 
     // 文件浏览器事件回调
-    file_browser.handle(move |b, ev| {
+    let mut info_frame_clone = info_frame.clone();
+    let base_path_rc_clone = base_path_rc.clone();
+    file_browser.set_callback(move |_| {
+        // 更新info_frame显示base_path
+        if let Some(path) = base_path_rc_clone.borrow().clone() {
+            info_frame_clone.set_label(&format!("基础路径: {}", path));
+        } else {
+            info_frame_clone.set_label("基础路径: 未选择");
+        }
+    });
+    
+    // 保留原有的事件处理
+    let original_handle = file_browser.handle(move |b, ev| {
         ui_core::handle_file_browser_events(b, ev)
     });
 }
