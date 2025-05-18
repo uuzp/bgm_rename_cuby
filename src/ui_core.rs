@@ -30,10 +30,16 @@ use crate::{
 
 /// 创建窗口标题栏及控件
 pub fn create_core_controls() -> (Button, Button, Button, Input, Button) {
-    let mut btn_choose_base = Button::new(0, 0, 0, 0, "选择源路径(B)");
+    // 创建竖直细长的按钮B，放在上面
+    let mut btn_choose_base = Button::new(0, 0, 10, 100, "");
     btn_choose_base.set_tooltip("选择包含视频文件的源文件夹(B)");
-    let mut btn_choose_anime = Button::new(0, 0, 0, 0, "选择目标路径 (A)");
+    btn_choose_base.set_color(fltk::enums::Color::from_hex(0x39C5BB));
+    
+    // 创建竖直细长的按钮A，放在下面
+    let mut btn_choose_anime = Button::new(0, 0, 10, 100, "");
     btn_choose_anime.set_tooltip("选择重命名后文件存放的目标文件夹 (A)");
+    btn_choose_anime.set_color(fltk::enums::Color::from_hex(0x9999FF));
+    
     let mut btn_done = Button::new(0, 0, 0, 0, "✔️ 完成");
     btn_done.set_tooltip("开始重命名操作");
     let mut search_input = Input::new(0, 0, 0, 0, "");
@@ -111,7 +117,7 @@ fn select_directory(title: &str) -> Option<String> {
 pub fn handle_choose_base_path_callback(base_path_rc: Rc<RefCell<Option<String>>>, mut btn_choose_base: Button, mut file_browser: FileBrowser, mut search_input: Input) {
     if let Some(path_str) = select_directory("base_path") {
         *base_path_rc.borrow_mut() = Some(path_str.clone());
-        btn_choose_base.set_label(&io::shorten_path_for_display(&path_str, MAX_BUTTON_LABEL_LEN));
+        // 移除设置按钮标签的代码，保持按钮固定标签"基础路径"
         io::load_files_to_file_browser(&path_str, &mut file_browser);
         if let Some(extracted_anime_name) = io::extract_anime_name_from_path(&path_str) {
             search_input.set_value(&extracted_anime_name);
@@ -124,7 +130,7 @@ pub fn handle_choose_base_path_callback(base_path_rc: Rc<RefCell<Option<String>>
 pub fn handle_choose_anime_path_callback(anime_path_rc: Rc<RefCell<Option<String>>>, mut btn_choose_anime: Button) {
     if let Some(path_str) = select_directory("anime_path") {
         *anime_path_rc.borrow_mut() = Some(path_str.clone());
-        btn_choose_anime.set_label(&io::shorten_path_for_display(&path_str, MAX_BUTTON_LABEL_LEN));
+        // 移除设置按钮标签的代码，保持按钮固定标签"番剧路径"
     }
 }
 

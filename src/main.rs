@@ -15,11 +15,15 @@ use clap::Parser;
 
 // --- 常量 ---
 // 窗口宽度
-pub const WINDOW_WIDTH: i32 = 800;
+pub const WINDOW_WIDTH: i32 = 1200;
 // 窗口高度
 pub const WINDOW_HEIGHT: i32 = 600;
 // 窗口宽度的一半
 pub const HALF_WIDTH: i32 = WINDOW_WIDTH / 2;
+// 窗口宽度的五分之三 (3:2比例的左侧)
+pub const THREE_FIFTHS_WIDTH: i32 = (WINDOW_WIDTH as f32 * 3.0 / 5.0) as i32;
+// 窗口宽度的五分之二 (3:2比例的右侧)
+pub const TWO_FIFTHS_WIDTH: i32 = (WINDOW_WIDTH as f32 * 2.0 / 5.0) as i32;
 // 菜单触发器行高度
 pub const MENU_TRIGGER_HEIGHT: i32 = 30; 
 // 菜单项面板展开高度

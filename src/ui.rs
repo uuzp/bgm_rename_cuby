@@ -11,6 +11,7 @@ use fltk::{
     input::Input,
     prelude::*,
     window::Window,
+    menu::{SysMenuBar, MenuFlag},
 };
 use std::{
     cell::RefCell,
@@ -22,34 +23,26 @@ use crate::io;
 use crate::ui_core;
 use crate::CliArgs;
 use crate::{
-    MAX_BUTTON_LABEL_LEN, WINDOW_WIDTH, WINDOW_HEIGHT, HALF_WIDTH, MENU_TRIGGER_HEIGHT,
-    MENU_ITEMS_PANEL_EXPANDED_HEIGHT, PATH_DISPLAY_PANEL_EXPANDED_HEIGHT, // 添加导入
+    WINDOW_WIDTH, WINDOW_HEIGHT, THREE_FIFTHS_WIDTH, TWO_FIFTHS_WIDTH  // 使用新的宽度常量
 };
 
 /// UI控件集合结构体
 #[allow(dead_code)]
 pub struct UIControls {
     pub main_vertical_flex: Flex,
-    pub menu_trigger_button: Button,
-    pub path_trigger_button: Button,
-    pub menu_items_panel_flex: Flex,
-    pub path_display_panel_flex: Flex,
     pub btn_choose_base: Button,
     pub btn_choose_anime: Button,
     pub btn_done: Button,
     pub search_input: Input,
     pub search_button: Button,
-    pub settings_button: Button,
-    pub unregister_button: Button,
-    pub about_button: Button,
-    pub info_frame: Frame,  // 新增的info_frame字段
+    pub sys_menu_bar: SysMenuBar, // 添加sys_menu_bar替代原菜单按钮
+    pub info_frame: Frame,
 }
 
 /// UI状态结构体
 #[allow(dead_code)]
 pub struct UIState {
     pub is_menu_expanded: Rc<RefCell<bool>>,
-    pub is_path_panel_expanded: Rc<RefCell<bool>>,
     pub search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
     pub episode_list_rc: Rc<RefCell<Option<api::EpisodeCollection>>>,
 
@@ -132,28 +125,11 @@ fn register_callbacks(
     file_browser: &mut FileBrowser,
     search_results_browser: &mut MultiBrowser,
 ) {
-    register_toggle_callbacks(
-        wind,
-        &mut controls.main_vertical_flex,
-        &mut controls.menu_trigger_button,
-        ui_state.is_menu_expanded.clone(),
-        &mut controls.menu_items_panel_flex,
-        &mut controls.path_trigger_button,
-        ui_state.is_path_panel_expanded.clone(),
-        &mut controls.path_display_panel_flex,
-    );
-
-    register_menu_item_callbacks(
-        &mut controls.settings_button,
-        &mut controls.unregister_button,
-        &mut controls.about_button,
-    );
-
     register_path_selection_callbacks(
         &mut controls.btn_choose_base,
         base_path_rc,
-        file_browser, // 传递原始 FileBrowser 的引用
-        &controls.search_input, // 传递原始 Input 的引用
+        file_browser,
+        &controls.search_input,
         &mut controls.btn_choose_anime,
         anime_path_rc,
     );
@@ -162,7 +138,7 @@ fn register_callbacks(
         &mut controls.search_input,
         &mut controls.search_button,
         &ui_state.search_results_rc,
-        search_results_browser, // 传递原始 MultiBrowser 的 引用
+        search_results_browser,
     );
 
     register_browser_event_callbacks(
@@ -171,63 +147,65 @@ fn register_callbacks(
         &ui_state.search_results_rc,
         &ui_state.episode_list_rc,
         &ui_state.selected_anime_id_rc,
-        &mut controls.info_frame,  // 传递info_frame
-        base_path_rc,  // 传递base_path_rc
-        anime_path_rc,  // 传递anime_path_rc
+        &mut controls.info_frame,
+        base_path_rc,
+        anime_path_rc,
     );
 
     register_done_button_callback(
         &mut controls.btn_done,
-        file_browser, // 传递原始 FileBrowser 的 引用
+        file_browser,
         &ui_state.episode_list_rc,
         base_path_rc,
         anime_path_rc,
         &ui_state.search_results_rc,
         &ui_state.selected_anime_id_rc,
-        search_results_browser, // 传递原始 MultiBrowser 的 引用
+        search_results_browser,
     );
 }
 /// 创建所有UI控件
 fn create_ui_controls(wind: &mut Window) -> (UIControls, FileBrowser, MultiBrowser) {
     // 创建核心控件
-    let (btn_choose_base,btn_choose_anime,btn_done,search_input,search_button) = 
+    let (mut btn_choose_base, mut btn_choose_anime, btn_done, search_input, search_button) = 
         ui_core::create_core_controls();
-    let (settings_button,unregister_button,about_button) = 
-        ui_core::create_menu_buttons();
     let (mut file_browser, mut search_results_browser) = 
         ui_core::create_main_browsers();
+    
+    // 创建系统菜单栏，直接使用常量设定宽度
+    let mut sys_menu_bar = SysMenuBar::new(0, 0, THREE_FIFTHS_WIDTH, 30, "");
+    
+    // 添加菜单项 - 移除文本中的"&"符号，避免显示下划线
+    sys_menu_bar.add("工具/注册右键菜单", fltk::enums::Shortcut::None, MenuFlag::Normal, |_| {
+        ui_core::handle_register_context_menu();
+    });
+    sys_menu_bar.add("工具/注销右键菜单", fltk::enums::Shortcut::None, MenuFlag::Normal, |_| {
+        ui_core::handle_unregister_context_menu();
+    });
+    sys_menu_bar.add("帮助/关于", fltk::enums::Shortcut::None, MenuFlag::Normal, |_| {
+        ui_core::handle_about_button();
+    });
     
     // 构建UI布局
     let (
         main_vertical_flex,
-        menu_trigger_button,
-        path_trigger_button,
-        menu_items_panel_flex,
-        path_display_panel_flex,
-        info_frame,  // 接收info_frame
+        info_frame,  
     ) = build_ui_layout(
         wind,
-        &btn_choose_base, &btn_choose_anime, &btn_done, &search_input, &search_button,
-        &settings_button, &unregister_button, &about_button,
+        &mut btn_choose_base, &mut btn_choose_anime, &btn_done, &search_input, &search_button,
+        &mut sys_menu_bar, // 修改为可变引用
         &mut file_browser, &mut search_results_browser,
     );
     
     // 创建UI控件集合结构体
     let controls = UIControls {
         main_vertical_flex,
-        menu_trigger_button,
-        path_trigger_button,
-        menu_items_panel_flex,
-        path_display_panel_flex,
         btn_choose_base,
         btn_choose_anime,
         btn_done,
         search_input,
         search_button,
-        settings_button,
-        unregister_button,
-        about_button,
-        info_frame,  // 添加info_frame到结构体
+        sys_menu_bar,
+        info_frame,
     };
     
     (controls, file_browser, search_results_browser)
@@ -243,27 +221,27 @@ fn initialize_ui_state(
     search_input: &mut Input,
 ) -> UIState {
     let is_menu_expanded = Rc::new(RefCell::new(false));
-    let is_path_panel_expanded = Rc::new(RefCell::new(false));
     let search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>> = Rc::new(RefCell::new(None));
     let episode_list_rc: Rc<RefCell<Option<api::EpisodeCollection>>> = Rc::new(RefCell::new(None));
     let selected_anime_id_rc: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
 
+    // 设置按钮颜色而非标签
+    btn_choose_base.set_label("");
+    btn_choose_anime.set_label("");
+    btn_choose_base.set_color(fltk::enums::Color::from_hex(0x39C5BB));
+    btn_choose_anime.set_color(fltk::enums::Color::from_hex(0x9999FF));
+
     if let Some(cli_base_path_str) = base_path_rc.borrow().as_deref() {
-        btn_choose_base.set_label(&io::shorten_path_for_display(cli_base_path_str, MAX_BUTTON_LABEL_LEN));
         io::load_files_to_file_browser(cli_base_path_str, file_browser);
         if let Some(extracted_anime_name) = io::extract_anime_name_from_path(cli_base_path_str) {
             search_input.set_value(&extracted_anime_name);
             println!("从命令行路径 {} 提取到番剧名: {}", cli_base_path_str, extracted_anime_name);
         }
     }
-    if let Some(cli_anime_path_str) = anime_path_rc.borrow().as_deref() {
-        btn_choose_anime.set_label(&io::shorten_path_for_display(cli_anime_path_str, MAX_BUTTON_LABEL_LEN));
-    }
 
     // 创建UI状态结构体
     UIState {
         is_menu_expanded,
-        is_path_panel_expanded,
         search_results_rc,
         episode_list_rc,
         selected_anime_id_rc,
@@ -273,44 +251,101 @@ fn initialize_ui_state(
 /// 构建UI主布局
 #[allow(clippy::too_many_arguments)]
 fn build_ui_layout(
-    wind: &mut Window,
-    btn_choose_base: &Button, 
-    btn_choose_anime: &Button, 
+    _wind: &mut Window,
+    btn_choose_base: &mut Button,
+    btn_choose_anime: &mut Button,
     btn_done: &Button, 
     search_input: &Input, 
     search_button: &Button,
-    settings_button: &Button, 
-    unregister_button: &Button, 
-    about_button: &Button,
+    sys_menu_bar: &mut SysMenuBar, // 保持可变引用，以便其他可能的操作
     file_browser: &mut FileBrowser, 
     search_results_browser: &mut MultiBrowser,
-) -> (Flex, Button, Button, Flex, Flex, Frame) {  // 修改返回类型添加Frame
-    // 创建主垂直Flex布局
-    let mut main_vertical_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
+) -> (Flex, Frame) {
+    // 创建顶部水平布局，菜单栏在左，搜索框在右
+    let mut top_bar_flex = Flex::new(0, 0, WINDOW_WIDTH, 30, "");
+    top_bar_flex.set_type(fltk::group::FlexType::Row);
+    
+    // 添加菜单栏到顶部布局左侧，不再需要resize
+    top_bar_flex.add(sys_menu_bar);
+    
+    // 创建右侧搜索区域，占据五分之二
+    let mut search_area = Flex::new(0, 0, TWO_FIFTHS_WIDTH, 30, "");
+    search_area.set_type(fltk::group::FlexType::Row);
+    search_area.add(search_input);
+    search_area.add(search_button);
+    search_area.fixed(search_button, 40);
+    search_area.end();
+    
+    top_bar_flex.add(&search_area);
+    top_bar_flex.fixed(&search_area, TWO_FIFTHS_WIDTH); // 固定搜索区域宽度
+    top_bar_flex.end();
+    
+    // 创建主垂直Flex布局，从菜单栏下方开始
+    let mut main_vertical_flex = Flex::new(0, 30, WINDOW_WIDTH, WINDOW_HEIGHT - 30, "");
     main_vertical_flex.set_type(fltk::group::FlexType::Column);
     
-    // 设置顶部触发器布局 - 移除btn_done参数
-    let (menu_trigger_button, path_trigger_button, top_triggers_flex) = 
-        setup_top_triggers_flex(search_input, search_button);
-    main_vertical_flex.add(&top_triggers_flex);
-    main_vertical_flex.fixed(&top_triggers_flex, MENU_TRIGGER_HEIGHT);
+    // 创建内容区域 - 使用水平Flex
+    let mut content_flex = Flex::new(0, 0, WINDOW_WIDTH, 0, "");
+    content_flex.set_type(fltk::group::FlexType::Row);
+    content_flex.set_spacing(0); // 设置为0，去除子元素之间的间距
+    content_flex.set_margin(0);  // 移除外边距
     
-    // 设置菜单项面板
-    let menu_items_panel_flex = setup_menu_items_panel(settings_button, unregister_button, about_button);
-    main_vertical_flex.add(&menu_items_panel_flex);
-    main_vertical_flex.fixed(&menu_items_panel_flex, 35);
+    // 左侧文件浏览区 - 现在占据五分之三
+    let mut left_flex = Flex::new(0, 0, 0, 0, "");
+    left_flex.set_type(fltk::group::FlexType::Column);
+    left_flex.set_margin(0);  // 移除所有外边距
+    left_flex.set_pad(0);     // 移除所有内边距
     
-    // 设置路径显示面板
-    let path_display_panel_flex = setup_path_display_panel(btn_choose_base, btn_choose_anime);
-    main_vertical_flex.add(&path_display_panel_flex);
-    main_vertical_flex.fixed(&path_display_panel_flex, 35);
+    // 设置文件浏览器的边框类型为FlatBox
+    file_browser.set_frame(fltk::enums::FrameType::FlatBox);
     
-    // 设置内容区域
-    let (content_flex, mut left_flex, mut right_flex) = setup_content_area();
-    
-    // 添加浏览器到左右布局
     left_flex.add(file_browser);
+    left_flex.end();
+    
+    // 中间按钮区，垂直排列B按钮和A按钮
+    let mut mid_flex = Flex::new(0, 0, 10, 0, "");
+    mid_flex.set_type(fltk::group::FlexType::Column);
+    mid_flex.set_spacing(0); // 确保没有间隙
+    mid_flex.set_margin(0);  // 移除所有外边距
+    mid_flex.set_pad(0);     // 移除所有内边距
+    
+    // 设置按钮样式，确保它们完全填满容器
+    btn_choose_base.set_down_frame(fltk::enums::FrameType::GtkDownBox);
+    btn_choose_anime.set_down_frame(fltk::enums::FrameType::GtkDownBox);
+    btn_choose_base.set_frame(fltk::enums::FrameType::GtkUpBox);
+    btn_choose_anime.set_frame(fltk::enums::FrameType::GtkUpBox);
+    
+    // 添加按钮边缘阴影效果
+    btn_choose_base.set_selection_color(fltk::enums::Color::from_hex(0x29B5AB)); // 按下时的颜色，稍深
+    btn_choose_anime.set_selection_color(fltk::enums::Color::from_hex(0x8989EF)); // 按下时的颜色，稍深
+    
+    // 移除按钮的内边距并设置为完全填充
+    btn_choose_base.clear_visible_focus();
+    btn_choose_anime.clear_visible_focus();
+    
+    mid_flex.add(btn_choose_base);
+    mid_flex.add(btn_choose_anime);
+    mid_flex.end();
+    
+    // 右侧搜索结果区 - 现在占据五分之二
+    let mut right_flex = Flex::new(0, 0, 0, 0, "");
+    right_flex.set_type(fltk::group::FlexType::Column);
+    right_flex.set_margin(0);  // 移除所有外边距
+    right_flex.set_pad(0);     // 移除所有内边距
+    
+    // 设置搜索结果浏览器的边框类型为FlatBox
+    search_results_browser.set_frame(fltk::enums::FrameType::FlatBox);
+    
     right_flex.add(search_results_browser);
+    right_flex.end();
+    
+    // 添加所有部分到内容区域，调整比例为3:2
+    content_flex.add(&left_flex);
+    content_flex.add(&mid_flex);
+    content_flex.fixed(&mid_flex, 15); // 固定中间区域宽度为15px
+    content_flex.add(&right_flex);
+    content_flex.fixed(&right_flex, TWO_FIFTHS_WIDTH - 15); // 右侧固定为五分之二减去中间按钮的宽度
+    content_flex.end();
     
     main_vertical_flex.add(&content_flex);
     
@@ -325,44 +360,13 @@ fn build_ui_layout(
     main_vertical_flex.fixed(&bottom_panel, 25);
     
     main_vertical_flex.end();
-    wind.resizable(&main_vertical_flex); // 使窗口可调整大小，并让 main_vertical_flex 填充
-    wind.end();
+    _wind.resizable(&main_vertical_flex);
+    _wind.end();
     
     (
         main_vertical_flex,
-        menu_trigger_button,
-        path_trigger_button,
-        menu_items_panel_flex,
-        path_display_panel_flex,
-        info_frame,  // 添加info_frame到返回值中
+        info_frame,
     )
-}
-
-// --- UI 元素布局函数 ---
-
-/// 设置顶部触发器布局
-fn setup_top_triggers_flex(search_input: &Input, search_button: &Button) -> (Button, Button, Flex) {
-    let mut top_triggers_flex = Flex::new(0, 0, WINDOW_WIDTH, MENU_TRIGGER_HEIGHT, "");
-    top_triggers_flex.set_type(fltk::group::FlexType::Row);
-    let mut menu_trigger_button = Button::new(0, 0, 80, 0, "菜单 ☰");
-    menu_trigger_button.set_tooltip("显示/隐藏菜单项");
-    top_triggers_flex.add(&menu_trigger_button);
-    top_triggers_flex.fixed(&menu_trigger_button, 80);
-    let mut path_trigger_button = Button::new(0, 0, 80, 0, "路径 🗀");
-    path_trigger_button.set_tooltip("显示/隐藏路径选择按钮");
-    top_triggers_flex.add(&path_trigger_button);
-    top_triggers_flex.fixed(&path_trigger_button, 80);
-    let top_spacer = Frame::new(0,0,0,0,"");
-    top_triggers_flex.add(&top_spacer);
-    // 移除btn_done
-    let search_gap_spacer = Frame::new(0,0,10,0,"");
-    top_triggers_flex.add(&search_gap_spacer);
-    top_triggers_flex.fixed(&search_gap_spacer, 10);
-    top_triggers_flex.add(search_input);
-    top_triggers_flex.add(search_button);
-    top_triggers_flex.fixed(search_button, 40);
-    top_triggers_flex.end();
-    (menu_trigger_button, path_trigger_button, top_triggers_flex)
 }
 
 /// 设置底部面板布局
@@ -370,103 +374,46 @@ fn setup_bottom_panel(info_frame: &Frame, btn_done: &Button) -> Flex {
     let mut bottom_panel_flex = Flex::new(0, 0, WINDOW_WIDTH, 25, "");
     bottom_panel_flex.set_type(fltk::group::FlexType::Row);
     bottom_panel_flex.add(info_frame);
-    let spacer = Frame::new(0, 0, 0, 0, "");
-    bottom_panel_flex.add(&spacer);
+    // 移除原有的空白占位符
     bottom_panel_flex.add(btn_done);
-    bottom_panel_flex.fixed(btn_done, 80);
+    bottom_panel_flex.fixed(btn_done, 80); // 固定"完成"按钮的宽度为80
     bottom_panel_flex.end();
     bottom_panel_flex
 }
 
-/// 设置菜单项面板
-fn setup_menu_items_panel(settings_button: &Button, unregister_button: &Button, about_button: &Button) -> Flex {
-    let mut menu_items_panel_flex = Flex::new(0, 0, WINDOW_WIDTH, 0, "");
-    menu_items_panel_flex.set_type(fltk::group::FlexType::Row);
-    menu_items_panel_flex.set_margin(2);
-    menu_items_panel_flex.add(settings_button);
-    menu_items_panel_flex.fixed(settings_button, 80);
-    menu_items_panel_flex.add(unregister_button);
-    menu_items_panel_flex.fixed(unregister_button, 80);
-    menu_items_panel_flex.add(about_button);
-    menu_items_panel_flex.fixed(about_button, 100);
-    menu_items_panel_flex.end();
-    menu_items_panel_flex.hide();
-    menu_items_panel_flex
-}
-
-/// 设置路径显示面板
-fn setup_path_display_panel(btn_choose_base: &Button, btn_choose_anime: &Button) -> Flex {
-    let mut path_display_panel_flex = Flex::new(0, 0, WINDOW_WIDTH, 0, "");
-    path_display_panel_flex.set_type(fltk::group::FlexType::Row);
-    path_display_panel_flex.set_margin(2);
-    path_display_panel_flex.add(btn_choose_base);
-    path_display_panel_flex.add(btn_choose_anime);
-    path_display_panel_flex.end();
-    path_display_panel_flex.hide();
-    path_display_panel_flex
-}
-
 /// 设置内容区域
-fn setup_content_area() -> (Flex, Flex, Flex) {
+fn setup_content_area() -> (Flex, Flex, Flex, Flex) {
     let mut content_flex = Flex::new(0, 0, WINDOW_WIDTH, 0, "");
     content_flex.set_type(fltk::group::FlexType::Row);
-    let mut left_flex = Flex::new(0, 0, HALF_WIDTH, 0, "");
+    content_flex.set_spacing(0); // 设置横向元素间距为0
+    
+    // 左侧文件浏览区 - 修改为占五分之三
+    let mut left_flex = Flex::new(0, 0, THREE_FIFTHS_WIDTH - 5, 0, "");
     left_flex.set_type(fltk::group::FlexType::Column);
     left_flex.set_margin(5);
     left_flex.end();
-    let mut right_flex = Flex::new(HALF_WIDTH, 0, HALF_WIDTH, 0, "");
+    
+    // 中间按钮区，宽度设置为10
+    let mut mid_flex = Flex::new(0, 0, 10, 0, "");
+    mid_flex.set_type(fltk::group::FlexType::Column);
+    mid_flex.end();
+    
+    // 右侧搜索结果区 - 修改为占五分之二
+    let mut right_flex = Flex::new(0, 0, TWO_FIFTHS_WIDTH - 5, 0, "");
     right_flex.set_type(fltk::group::FlexType::Column);
     right_flex.set_margin(5);
     right_flex.end();
+    
     content_flex.add(&left_flex);
+    content_flex.add(&mid_flex);
+    content_flex.fixed(&mid_flex, 10); // 固定中间区域宽度为10
     content_flex.add(&right_flex);
     content_flex.end();
-    (content_flex, left_flex, right_flex)
+    
+    (content_flex, left_flex, mid_flex, right_flex)
 }
 
 // --- 回调注册辅助函数 ---
-
-/// 注册菜单和路径面板的切换回调
-fn register_toggle_callbacks(
-    wind: &mut Window,
-    main_vertical_flex: &mut Flex,
-    menu_trigger_button: &mut Button,
-    is_menu_expanded: Rc<RefCell<bool>>,
-    menu_items_panel_flex: &mut Flex,
-    path_trigger_button: &mut Button,
-    is_path_panel_expanded: Rc<RefCell<bool>>,
-    path_display_panel_flex: &mut Flex,
-) {
-    // 菜单切换回调
-    let is_menu_expanded_cb = is_menu_expanded.clone();
-    let mut main_flex_cb_menu = main_vertical_flex.clone();
-    let mut menu_panel_cb_menu = menu_items_panel_flex.clone();
-    let mut wind_cb_menu = wind.clone();
-    menu_trigger_button.set_callback(move |_| {
-        ui_core::handle_panel_toggle(// 调用新的通用函数
-            is_menu_expanded_cb.clone(),
-            &mut main_flex_cb_menu,
-            &mut menu_panel_cb_menu,
-            &mut wind_cb_menu,
-            MENU_ITEMS_PANEL_EXPANDED_HEIGHT, // 传递菜单展开高度
-        );
-    });
-
-    // 路径面板切换回调
-    let is_path_panel_expanded_cb = is_path_panel_expanded.clone();
-    let mut main_flex_cb_path = main_vertical_flex.clone();
-    let mut path_panel_cb_path = path_display_panel_flex.clone();
-    let mut wind_cb_path = wind.clone();
-    path_trigger_button.set_callback(move |_| {
-        ui_core::handle_panel_toggle( // 调用新的通用函数
-            is_path_panel_expanded_cb.clone(),
-            &mut main_flex_cb_path,
-            &mut path_panel_cb_path,
-            &mut wind_cb_path,
-            PATH_DISPLAY_PANEL_EXPANDED_HEIGHT, // 传递路径面板展开高度
-        );
-    });
-}
 
 /// 注册菜单项按钮的回调
 fn register_menu_item_callbacks(
@@ -483,10 +430,10 @@ fn register_menu_item_callbacks(
 fn register_path_selection_callbacks(
     btn_choose_base: &mut Button,
     base_path_rc: &Rc<RefCell<Option<String>>>,
-    file_browser: &FileBrowser, // 接收引用，在闭包中克隆
-    search_input: &Input,       // 接收引用，在闭包中克隆
+    file_browser: &FileBrowser, 
+    search_input: &Input,      
     btn_choose_anime: &mut Button,
-    anime_path_rc: &Rc<RefCell<Option<String>>>,
+    anime_path_rc: &Rc<RefCell<Option<String>>>
 ) {
     // "选择基本路径" 按钮回调
     let base_path_rc_clone = base_path_rc.clone();
@@ -556,9 +503,9 @@ fn register_browser_event_callbacks(
     search_results_rc: &Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
     episode_list_rc: &Rc<RefCell<Option<api::EpisodeCollection>>>,
     selected_anime_id_rc: &Rc<RefCell<Option<String>>>,
-    info_frame: &mut Frame,  // 添加info_frame参数
-    base_path_rc: &Rc<RefCell<Option<String>>>,  // 添加base_path_rc
-    anime_path_rc: &Rc<RefCell<Option<String>>>,  // 添加anime_path_rc
+    info_frame: &mut Frame,
+    base_path_rc: &Rc<RefCell<Option<String>>>,
+    anime_path_rc: &Rc<RefCell<Option<String>>>,
 ) {
     // 搜索结果浏览器双击回调
     let search_results_rc_clone = search_results_rc.clone();
@@ -586,18 +533,18 @@ fn register_browser_event_callbacks(
 
     // 文件浏览器事件回调
     let mut info_frame_clone = info_frame.clone();
-    let base_path_rc_clone = base_path_rc.clone();
+    let _base_path_rc_clone = base_path_rc.clone(); // 添加下划线前缀避免警告
     file_browser.set_callback(move |_| {
         // 更新info_frame显示base_path
-        if let Some(path) = base_path_rc_clone.borrow().clone() {
+        if let Some(path) = _base_path_rc_clone.borrow().clone() {
             info_frame_clone.set_label(&format!("基础路径: {}", path));
         } else {
             info_frame_clone.set_label("基础路径: 未选择");
         }
     });
     
-    // 保留原有的事件处理
-    let original_handle = file_browser.handle(move |b, ev| {
+    // 保留原有的事件处理，添加_前缀避免未使用警告
+    let _original_handle = file_browser.handle(move |b, ev| {
         ui_core::handle_file_browser_events(b, ev)
     });
 }
