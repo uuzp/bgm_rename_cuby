@@ -20,10 +20,10 @@ use std::{
 use crate::bangumi_api as api;
 use crate::io;
 use crate::{
-    MENU_TRIGGER_HEIGHT, 
-    MENU_ITEMS_PANEL_EXPANDED_HEIGHT, 
-    PATH_DISPLAY_PANEL_EXPANDED_HEIGHT,
-    MAX_BUTTON_LABEL_LEN
+    MENU_TRIGGER_HEIGHT, // 菜单触发器的高度
+    MENU_ITEMS_PANEL_EXPANDED_HEIGHT, // 菜单项面板展开时的高度
+    PATH_DISPLAY_PANEL_EXPANDED_HEIGHT, // 路径显示面板展开时的高度
+    MAX_BUTTON_LABEL_LEN // 按钮标签的最大长度
 };
 
 // --- 创建窗口标题栏及控件 ---
@@ -71,73 +71,193 @@ pub fn create_main_browsers() -> (FileBrowser, MultiBrowser) {
 
 // --- UI 事件处理函数 ---
 
-/// 处理菜单的展开与收起
-pub fn handle_menu_toggle<W: fltk::prelude::WindowExt>(is_menu_expanded: Rc<RefCell<bool>>, main_flex: &mut fltk::group::Flex, menu_panel: &mut fltk::group::Flex, window: &mut W) {
-    let mut expanded = is_menu_expanded.borrow_mut();
+/// 处理面板的展开与收起
+pub fn handle_panel_toggle<W: fltk::prelude::WindowExt>(
+    is_expanded_rc: Rc<RefCell<bool>>,
+    main_flex: &mut fltk::group::Flex,
+    panel: &mut fltk::group::Flex,
+    window: &mut W,
+    expanded_height: i32,
+) {
+    let mut expanded = is_expanded_rc.borrow_mut();
     *expanded = !*expanded;
     if *expanded {
-        main_flex.fixed(menu_panel, MENU_ITEMS_PANEL_EXPANDED_HEIGHT);
-        menu_panel.show();
+        main_flex.fixed(panel, expanded_height);
+        panel.show();
     } else {
-        menu_panel.hide();
-        main_flex.fixed(menu_panel, 0);
+        panel.hide();
+        main_flex.fixed(panel, 0);
     }
     main_flex.layout();
     window.redraw();
 }
 
-/// 处理路径面板的展开与收起
-pub fn handle_path_panel_toggle<W: fltk::prelude::WindowExt>(is_path_panel_expanded: Rc<RefCell<bool>>, main_flex: &mut fltk::group::Flex, path_panel: &mut fltk::group::Flex, window: &mut W) {
-    let mut expanded = is_path_panel_expanded.borrow_mut();
-    *expanded = !*expanded;
-    if *expanded {
-        main_flex.fixed(path_panel, PATH_DISPLAY_PANEL_EXPANDED_HEIGHT);
-        path_panel.show();
-    } else {
-        path_panel.hide();
-        main_flex.fixed(path_panel, 0);
+/// 辅助函数：打开目录选择对话框并返回选择的路径
+fn select_directory(title: &str) -> Option<String> {
+    let mut dialog = dialog::FileDialog::new(dialog::FileDialogType::BrowseDir);
+    dialog.set_title(title);
+    dialog.show();
+    let chosen_path_pb = dialog.filename();
+    if !chosen_path_pb.as_os_str().is_empty() {
+        let path = Path::new(&chosen_path_pb);
+        if path.is_dir() {
+            return path.to_str().map(String::from);
+        }
     }
-    main_flex.layout();
-    window.redraw();
+    None
 }
 
 /// 处理选择源文件夹按钮回调
 pub fn handle_choose_base_path_callback(base_path_rc: Rc<RefCell<Option<String>>>, mut btn_choose_base: Button, mut file_browser: FileBrowser, mut search_input: Input) {
-    let mut dialog = dialog::FileDialog::new(dialog::FileDialogType::BrowseDir);
-    dialog.set_title("选择源文件夹 (B)");
-    dialog.show();
-    let chosen_path_pb = dialog.filename();
-    if !chosen_path_pb.as_os_str().is_empty() {
-        let path = Path::new(&chosen_path_pb); // 使用 std::path::Path 明确指定
-        if path.is_dir() {
-            if let Some(path_str) = path.to_str() {
-                *base_path_rc.borrow_mut() = Some(path_str.to_string());
-                btn_choose_base.set_label(&io::shorten_path_for_display(path_str, MAX_BUTTON_LABEL_LEN));
-                io::load_files_to_file_browser(path_str, &mut file_browser);
-                if let Some(extracted_anime_name) = io::extract_anime_name_from_path(path_str) {
-                    search_input.set_value(&extracted_anime_name);
-                    println!("从路径 {} 提取到番剧名: {}", path_str, extracted_anime_name);
-                }
-            }
+    if let Some(path_str) = select_directory("base_path") {
+        *base_path_rc.borrow_mut() = Some(path_str.clone());
+        btn_choose_base.set_label(&io::shorten_path_for_display(&path_str, MAX_BUTTON_LABEL_LEN));
+        io::load_files_to_file_browser(&path_str, &mut file_browser);
+        if let Some(extracted_anime_name) = io::extract_anime_name_from_path(&path_str) {
+            search_input.set_value(&extracted_anime_name);
+            println!("从路径 {} 提取到番剧名: {}", path_str, extracted_anime_name);
         }
     }
 }
 
 /// 处理选择目标文件夹按钮回调
 pub fn handle_choose_anime_path_callback(anime_path_rc: Rc<RefCell<Option<String>>>, mut btn_choose_anime: Button) {
-    let mut dialog = dialog::FileDialog::new(dialog::FileDialogType::BrowseDir);
-    dialog.set_title("选择目标文件夹 (A)");
-    dialog.show();
-    let chosen_path = dialog.filename();
-    if !chosen_path.as_os_str().is_empty() {
-        let path = Path::new(&chosen_path); // 使用 std::path::Path 明确指定
-        if path.is_dir() {
-            if let Some(path_str) = path.to_str() {
-                *anime_path_rc.borrow_mut() = Some(path_str.to_string());
-                btn_choose_anime.set_label(&io::shorten_path_for_display(path_str, MAX_BUTTON_LABEL_LEN));
+    if let Some(path_str) = select_directory("anime_path") {
+        *anime_path_rc.borrow_mut() = Some(path_str.clone());
+        btn_choose_anime.set_label(&io::shorten_path_for_display(&path_str, MAX_BUTTON_LABEL_LEN));
+    }
+}
+
+/// 处理文件浏览器中的 Push 事件
+fn handle_file_browser_push_event(browser: &mut FileBrowser, highlighted_line_ptr: *mut i32) -> bool {
+    if app::event_clicks() { // 双击事件
+        unsafe { *highlighted_line_ptr = browser.value(); }
+        println!("高亮行: {}", unsafe { *highlighted_line_ptr });
+        return true;
+    }
+    false
+}
+
+/// 处理文件浏览器中的 KeyDown 事件 (特别是空格键)
+fn handle_file_browser_keydown_event(browser: &mut FileBrowser, highlighted_line_ptr: *mut i32) -> bool {
+    let key = app::event_key(); // 获取当前按下的键
+
+    match key {
+        Key::Up | Key::Down => handle_arrow_keys(browser, highlighted_line_ptr),
+        Key::Escape => handle_escape_key(browser, highlighted_line_ptr),
+        _ => {
+            if let Some(c) = key.to_char() {
+                match c {
+                    ' ' => handle_space_key(browser, highlighted_line_ptr),
+                    _ => false, // 其他字符不处理
+                }
+            } else {
+                false // 非字符键且未在前面匹配到的键不处理
             }
         }
     }
+}
+
+/// 辅助函数：处理方向键（上/下）
+fn handle_arrow_keys(browser: &mut FileBrowser, highlighted_line_ptr: *mut i32) -> bool {
+    // 如果当前没有选中行，并且列表不为空，则选中第一行
+    // 这允许在没有初始选中的情况下通过方向键开始导航
+    if browser.value() <= 0 && browser.size() > 0 {
+        browser.select(1); // 选中第一行
+        unsafe { *highlighted_line_ptr = -1; } // 重置标记状态，因为这是导航操作
+    }
+    // FileBrowser 部件本身会处理实际的选中项变化（上/下移动）
+    // 返回 true 表示我们已经处理或初始化了此键的操作
+    true
+}
+
+/// 辅助函数：处理空格键
+fn handle_space_key(browser: &mut FileBrowser, highlighted_line_ptr: *mut i32) -> bool {
+    let current_line = browser.value(); // 获取当前选中的行号
+    if current_line <= 0 { // 如果没有有效行被选中
+        return true; // 不执行任何操作
+    }
+
+    let current_highlighted_val = unsafe { *highlighted_line_ptr }; // 读取一次高亮行值
+    match current_highlighted_val {
+        -1 => {
+            // 情况1：当前没有行被标记 (第一次在某行上按空格)
+            // 操作：标记当前行
+            unsafe { *highlighted_line_ptr = current_line; } // 记录被标记的行号
+            browser.select(current_line); // 在视觉上选中（高亮）该行
+        }
+        hl if hl == current_line => {
+            // 情况2：在已标记的同一行（hl, 即 current_line）上再次按空格
+            // 操作：取消标记
+            browser.deselect(hl); // 取消该行的视觉选中/标记
+            unsafe { *highlighted_line_ptr = -1; } // 清除标记状态
+        }
+        hl => {
+            // 情况3：已有一行被标记（hl），并在不同的行（current_line）上按空格
+            // 操作：交换这两行的文本内容，并清除标记状态
+
+            // 获取两行文本
+            let text_highlighted = browser.text(hl).unwrap_or_default();
+            let text_current = browser.text(current_line).unwrap_or_default();
+
+            // 交换文本
+            browser.set_text(hl, &text_current);
+            browser.set_text(current_line, &text_highlighted);
+
+            // 保持当前行（即光标所在的行，其内容刚被交换）的选中状态
+            browser.select(current_line);
+            // 重置标记状态，等待下一次标记操作
+            unsafe { *highlighted_line_ptr = -1; }
+
+            browser.redraw(); // 确保界面更新以显示交换结果
+        }
+    }
+    true // 表示空格键事件已处理
+}
+
+/// 辅助函数：处理ESC键
+fn handle_escape_key(browser: &mut FileBrowser, highlighted_line_ptr: *mut i32) -> bool {
+    let current_highlighted_val = unsafe { *highlighted_line_ptr }; // 读取一次高亮行值
+    if current_highlighted_val != -1 { // 如果按了ESC键且有行被标记
+        browser.deselect(current_highlighted_val); // 取消标记行的视觉选中
+        unsafe { *highlighted_line_ptr = -1; } // 清除标记状态
+        return true; // 表示ESC键事件已处理
+    }
+    false // 如果没有行被标记，则ESC键事件未被处理
+}
+
+/// 处理文件浏览器中的 Drag 事件
+fn handle_file_browser_drag_event(browser: &mut FileBrowser, drag_item_ptr: *mut i32) -> bool {
+    let _y = app::event_y(); // y 坐标可能用于更精确的行计算，但当前未使用
+    let current_item_under_mouse = browser.value(); // 获取鼠标当前悬停或选中的行
+
+    let initial_drag_item_val = unsafe { *drag_item_ptr }; // 读取当前拖拽项的值
+
+    if initial_drag_item_val < 0 { // 如果 drag_item 小于0，表示这是拖拽的开始
+        unsafe { *drag_item_ptr = current_item_under_mouse; } // 记录开始拖拽的项
+        return true;
+    }
+    
+    // 如果鼠标下的项有效，并且不是当前正在拖拽的项
+    if current_item_under_mouse > 0 && current_item_under_mouse != initial_drag_item_val {
+        let text1 = browser.text(initial_drag_item_val).unwrap_or_default().to_string();
+        let text2 = browser.text(current_item_under_mouse).unwrap_or_default().to_string();
+          
+        browser.set_text(initial_drag_item_val, &text2); // 将原拖拽项的内容设置为新位置项的内容
+        browser.set_text(current_item_under_mouse, &text1); // 将新位置项的内容设置为原拖拽项的内容
+          
+        unsafe { *drag_item_ptr = current_item_under_mouse; } // 更新拖拽的项为当前鼠标下的项
+        browser.select(current_item_under_mouse); // 保持选中新位置的项
+        browser.redraw();
+        return true;
+    }
+    true // 即使没有发生交换，也处理了拖拽事件
+}
+
+/// 处理文件浏览器中的 Released 事件
+fn handle_file_browser_released_event(drag_item_ptr: *mut i32) -> bool {
+    unsafe { *drag_item_ptr = -1; } // 重置拖拽项
+    true
 }
 
 /// 处理文件浏览器事件
@@ -146,90 +266,14 @@ pub fn handle_file_browser_events(browser: &mut FileBrowser, event: Event) -> bo
     static mut DRAG_ITEM: i32 = -1;
     static mut HIGHLIGHTED_LINE: i32 = -1;
     
-    match event {
-        Event::Push => {
-            if app::event_clicks() { // 双击事件
-                unsafe { 
-                    HIGHLIGHTED_LINE = browser.value();
-                    println!("高亮行: {}", HIGHLIGHTED_LINE);
-                }
-                return true;
-            }
-            false
-        },
-        Event::KeyDown => {
-            let key = app::event_key();
-            if key == fltk::enums::Key::from_char(' ') {
-                let current_line = browser.value();
-                unsafe {
-                    if HIGHLIGHTED_LINE == -1 {
-                        // 第一次按空格，设置高亮行
-                        HIGHLIGHTED_LINE = current_line;
-                        println!("高亮行: {}", HIGHLIGHTED_LINE);
-                        browser.select(current_line); // 高亮选中该行
-                        return true;
-                    } else if current_line != HIGHLIGHTED_LINE && current_line > 0 {
-                        // 第二次按空格，交换行
-                        println!("交换行: {} 和 {}", HIGHLIGHTED_LINE, current_line);
-                        
-                        // 获取两行的文本
-                        let text1 = browser.text(HIGHLIGHTED_LINE).unwrap_or_default().to_string();
-                        let text2 = browser.text(current_line).unwrap_or_default().to_string();
-                        
-                        // 交换内容
-                        browser.set_text(HIGHLIGHTED_LINE, &text2);
-                        browser.set_text(current_line, &text1);
-                          // 重置高亮行
-                        HIGHLIGHTED_LINE = -1;
-                        browser.deselect(current_line);
-                        browser.redraw();
-                        return true;
-                    } else {
-                        // 取消高亮
-                        HIGHLIGHTED_LINE = -1;
-                        browser.deselect(current_line);
-                        return true;
-                    }
-                }
-            }
-            false
-        },
-        Event::Drag => {
-            unsafe {
-                let _y = app::event_y();
-                let item = browser.value();
-                
-                if DRAG_ITEM < 0 {
-                    DRAG_ITEM = item; // 记录开始拖拽的项
-                    return true;
-                }
-                // 计算当前移动到哪一行
-                // 由于没有直接的方法，我们根据y坐标简单估计行号
-                let _y_pos = app::event_y();
-                let new_item = browser.value(); // 默认使用当前选中行
-                
-                if new_item > 0 && new_item != DRAG_ITEM {
-                    // 获取两行的文本
-                    let text1 = browser.text(DRAG_ITEM).unwrap_or_default().to_string();
-                    let text2 = browser.text(new_item).unwrap_or_default().to_string();
-                      // 交换内容
-                    browser.set_text(DRAG_ITEM, &text2);
-                    browser.set_text(new_item, &text1);
-                      DRAG_ITEM = new_item; // 更新拖拽的项
-                    browser.select(new_item); // 更新选中状态
-                    browser.redraw();
-                    return true;
-                }
-            }
-            true
-        },
-        Event::Released => {
-            unsafe {
-                DRAG_ITEM = -1; // 重置拖拽项
-            }
-            true
-        },
-        _ => false,
+    unsafe { // 操作静态可变变量需要 unsafe 块
+        match event {
+            Event::Push => handle_file_browser_push_event(browser, std::ptr::addr_of_mut!(HIGHLIGHTED_LINE)),
+            Event::KeyDown => handle_file_browser_keydown_event(browser, std::ptr::addr_of_mut!(HIGHLIGHTED_LINE)),
+            Event::Drag => handle_file_browser_drag_event(browser, std::ptr::addr_of_mut!(DRAG_ITEM)),
+            Event::Released => handle_file_browser_released_event(std::ptr::addr_of_mut!(DRAG_ITEM)),
+            _ => false,
+        }
     }
 }
 
@@ -351,6 +395,7 @@ pub fn handle_search_results_double_click(
                             *episode_list_rc.borrow_mut() = Some(ep_collection.clone());
                             *selected_anime_id_rc.borrow_mut() = Some(subject_id.to_string());
                             
+
                             // 清除现有的搜索结果列表
                             browser.clear();
 
@@ -763,23 +808,6 @@ pub fn register_search_button_callback(
             search_input_cb.clone(),
             search_results_rc_cb.clone(),
             search_results_browser_cb.clone(),
-        );
-    });
-}
-
-/// 注册搜索结果浏览器的回调
-pub fn register_search_results_browser_callback(
-    search_results_browser: &mut MultiBrowser,
-    search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
-    episode_list_rc: Rc<RefCell<Option<api::EpisodeCollection>>>,
-    selected_anime_id_rc: Rc<RefCell<Option<String>>>,
-) {
-    search_results_browser.set_callback(move |b| {
-        handle_search_results_double_click(
-            b,
-            search_results_rc.clone(),
-            episode_list_rc.clone(),
-            selected_anime_id_rc.clone(),
         );
     });
 }

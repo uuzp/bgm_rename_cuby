@@ -21,7 +21,10 @@ use crate::bangumi_api as api;
 use crate::io;
 use crate::ui_core;
 use crate::CliArgs;
-use crate::{MAX_BUTTON_LABEL_LEN, WINDOW_WIDTH, WINDOW_HEIGHT, HALF_WIDTH, MENU_TRIGGER_HEIGHT};
+use crate::{
+    MAX_BUTTON_LABEL_LEN, WINDOW_WIDTH, WINDOW_HEIGHT, HALF_WIDTH, MENU_TRIGGER_HEIGHT,
+    MENU_ITEMS_PANEL_EXPANDED_HEIGHT, PATH_DISPLAY_PANEL_EXPANDED_HEIGHT, // 添加导入
+};
 
 /// UI控件集合结构体
 #[allow(dead_code)]
@@ -430,11 +433,12 @@ fn register_toggle_callbacks(
     let mut menu_panel_cb_menu = menu_items_panel_flex.clone();
     let mut wind_cb_menu = wind.clone();
     menu_trigger_button.set_callback(move |_| {
-        ui_core::handle_menu_toggle(
+        ui_core::handle_panel_toggle( // 调用新的通用函数
             is_menu_expanded_cb.clone(),
             &mut main_flex_cb_menu,
             &mut menu_panel_cb_menu,
             &mut wind_cb_menu,
+            MENU_ITEMS_PANEL_EXPANDED_HEIGHT, // 传递菜单展开高度
         );
     });
 
@@ -444,11 +448,12 @@ fn register_toggle_callbacks(
     let mut path_panel_cb_path = path_display_panel_flex.clone();
     let mut wind_cb_path = wind.clone();
     path_trigger_button.set_callback(move |_| {
-        ui_core::handle_path_panel_toggle(
+        ui_core::handle_panel_toggle( // 调用新的通用函数
             is_path_panel_expanded_cb.clone(),
             &mut main_flex_cb_path,
             &mut path_panel_cb_path,
             &mut wind_cb_path,
+            PATH_DISPLAY_PANEL_EXPANDED_HEIGHT, // 传递路径面板展开高度
         );
     });
 }
