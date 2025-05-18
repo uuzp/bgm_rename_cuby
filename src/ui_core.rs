@@ -399,7 +399,7 @@ pub fn handle_search_results_double_click(
 }
 
 /// 流程控制：获取选中番剧的剧集数据
-pub fn get_episode_data_for_processing(
+fn get_episode_data_for_processing(
     episode_list_rc: &Rc<RefCell<Option<api::EpisodeCollection>>>
 ) -> Result<api::EpisodeCollection, String> {
     match episode_list_rc.borrow().as_ref() {
@@ -655,7 +655,7 @@ pub fn handle_done_button_callback(
 
 /// 注册菜单触发按钮的回调
 #[allow(dead_code)]
-pub fn register_menu_trigger_callback(
+fn register_menu_trigger_callback(
     menu_trigger_button: &mut Button, 
     is_menu_expanded: Rc<RefCell<bool>>,
     menu_items_panel_flex: &mut Flex,
@@ -701,7 +701,7 @@ pub fn register_menu_trigger_callback(
 /// 注册路径触发按钮的回调
 #[allow(dead_code)]
 #[allow(unused_variables)]
-pub fn register_path_trigger_callback(
+fn register_path_trigger_callback(
     path_trigger_button: &mut Button, 
     is_path_panel_expanded: Rc<RefCell<bool>>,
     path_display_panel_flex: &mut Flex,

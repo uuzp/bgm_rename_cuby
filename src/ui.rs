@@ -84,7 +84,7 @@ pub fn init_ui(cli_args: &CliArgs) -> Window {
 }
 
 /// 从命令行参数初始化路径
-pub fn initialize_paths_from_cli(cli_args: &crate::CliArgs) -> (Rc<RefCell<Option<String>>>, Rc<RefCell<Option<String>>>) {
+fn initialize_paths_from_cli(cli_args: &crate::CliArgs) -> (Rc<RefCell<Option<String>>>, Rc<RefCell<Option<String>>>) {
     (
         Rc::new(RefCell::new(cli_args.base_path.clone())),
         Rc::new(RefCell::new(cli_args.anime_path.clone())),
@@ -414,7 +414,7 @@ fn register_toggle_callbacks(
     let mut menu_panel_cb_menu = menu_items_panel_flex.clone();
     let mut wind_cb_menu = wind.clone();
     menu_trigger_button.set_callback(move |_| {
-        ui_core::handle_panel_toggle( // 调用新的通用函数
+        ui_core::handle_panel_toggle(// 调用新的通用函数
             is_menu_expanded_cb.clone(),
             &mut main_flex_cb_menu,
             &mut menu_panel_cb_menu,
