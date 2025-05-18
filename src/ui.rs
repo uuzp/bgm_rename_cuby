@@ -104,7 +104,7 @@ fn initialize_ui(cli_args: &crate::CliArgs, wind: &mut Window) -> UIComponents {
     let (base_path_rc, anime_path_rc) = initialize_paths_from_cli(cli_args);
     
     // 创建所有UI控件
-    let (mut controls, file_browser, search_results_browser) = create_ui_controls(wind);
+    let (mut controls, mut file_browser, mut search_results_browser) = create_ui_controls(wind);
     
     // 初始化UI状态并应用命令行参数
     let ui_state = initialize_ui_state(
@@ -112,19 +112,19 @@ fn initialize_ui(cli_args: &crate::CliArgs, wind: &mut Window) -> UIComponents {
         &anime_path_rc, 
         &mut controls.btn_choose_base, 
         &mut controls.btn_choose_anime,
-        &file_browser, 
+        &mut file_browser, 
         &mut controls.search_input
     );
     
     // 设置所有回调
     register_callbacks(
         wind,
-        &controls,
+        &mut controls, // 传递可变引用
         &ui_state,
         &base_path_rc, 
         &anime_path_rc,
-        &file_browser,
-        &search_results_browser
+        &mut file_browser, // 传递可变引用
+        &mut search_results_browser // 传递可变引用
     );
     
     // 返回组合到一起的UI组件
@@ -137,24 +137,85 @@ fn initialize_ui(cli_args: &crate::CliArgs, wind: &mut Window) -> UIComponents {
         state: ui_state,
     }
 }
+/// 注册所有回调的总入口函数
+fn register_callbacks(
+    wind: &mut Window,
+    controls: &mut UIControls,
+    ui_state: &UIState,
+    base_path_rc: &Rc<RefCell<Option<String>>>,
+    anime_path_rc: &Rc<RefCell<Option<String>>>,
+    file_browser: &mut FileBrowser,
+    search_results_browser: &mut MultiBrowser,
+) {
+    register_toggle_callbacks(
+        wind,
+        &mut controls.main_vertical_flex,
+        &mut controls.menu_trigger_button,
+        ui_state.is_menu_expanded.clone(),
+        &mut controls.menu_items_panel_flex,
+        &mut controls.path_trigger_button,
+        ui_state.is_path_panel_expanded.clone(),
+        &mut controls.path_display_panel_flex,
+    );
 
+    register_menu_item_callbacks(
+        &mut controls.settings_button,
+        &mut controls.unregister_button,
+        &mut controls.about_button,
+    );
+
+    register_path_selection_callbacks(
+        &mut controls.btn_choose_base,
+        base_path_rc,
+        file_browser, // 传递原始 FileBrowser 的引用
+        &controls.search_input, // 传递原始 Input 的引用
+        &mut controls.btn_choose_anime,
+        anime_path_rc,
+    );
+
+    register_search_callbacks(
+        &mut controls.search_input,
+        &mut controls.search_button,
+        &ui_state.search_results_rc,
+        search_results_browser, // 传递原始 MultiBrowser 的 引用
+    );
+
+    register_browser_event_callbacks(
+        file_browser,
+        search_results_browser,
+        &ui_state.search_results_rc,
+        &ui_state.episode_list_rc,
+        &ui_state.selected_anime_id_rc,
+    );
+
+    register_done_button_callback(
+        &mut controls.btn_done,
+        file_browser, // 传递原始 FileBrowser 的 引用
+        &ui_state.episode_list_rc,
+        base_path_rc,
+        anime_path_rc,
+        &ui_state.search_results_rc,
+        &ui_state.selected_anime_id_rc,
+        search_results_browser, // 传递原始 MultiBrowser 的 引用
+    );
+}
 /// 创建所有UI控件
 fn create_ui_controls(wind: &mut Window) -> (UIControls, FileBrowser, MultiBrowser) {
     // 创建核心控件
-    let (mut btn_choose_base, mut btn_choose_anime, mut btn_done, mut search_input, mut search_button) = 
+    let (btn_choose_base,btn_choose_anime,btn_done,search_input,search_button) = 
         ui_core::create_core_controls();
-    let (mut settings_button, mut unregister_button, mut about_button) = 
+    let (settings_button,unregister_button,about_button) = 
         ui_core::create_menu_buttons();
     let (mut file_browser, mut search_results_browser) = 
         ui_core::create_main_browsers();
     
     // 构建UI布局
     let (
-        mut main_vertical_flex,
-        mut menu_trigger_button,
-        mut path_trigger_button,
-        mut menu_items_panel_flex,
-        mut path_display_panel_flex,
+        main_vertical_flex,
+        menu_trigger_button,
+        path_trigger_button,
+        menu_items_panel_flex,
+        path_display_panel_flex,
     ) = build_ui_layout(
         wind,
         &btn_choose_base, &btn_choose_anime, &btn_done, &search_input, &search_button,
@@ -188,132 +249,9 @@ fn initialize_ui_state(
     anime_path_rc: &Rc<RefCell<Option<String>>>,
     btn_choose_base: &mut Button,
     btn_choose_anime: &mut Button,
-    file_browser: &FileBrowser,
-    search_input: &mut Input,
-) -> UIState {
-    let (is_menu_expanded, is_path_panel_expanded, search_results_rc, episode_list_rc, selected_anime_id_rc) =
-        initialize_ui_state_and_apply_cli_args(
-            base_path_rc, anime_path_rc,
-            btn_choose_base, btn_choose_anime,
-            &mut file_browser.clone(), search_input,
-        );
-    
-    // 创建UI状态结构体
-    UIState {
-        is_menu_expanded,
-        is_path_panel_expanded,
-        search_results_rc,
-        episode_list_rc,
-        selected_anime_id_rc,
-    }
-}
-
-/// 注册所有回调
-fn register_callbacks(
-    wind: &mut Window,
-    controls: &UIControls,
-    ui_state: &UIState,
-    base_path_rc: &Rc<RefCell<Option<String>>>,
-    anime_path_rc: &Rc<RefCell<Option<String>>>,
-    file_browser: &FileBrowser,
-    search_results_browser: &MultiBrowser,
-) {
-    // 为回调准备克隆
-    let file_browser_clone_for_base_cb = file_browser.clone();
-    let search_input_clone_for_base_cb = controls.search_input.clone();
-    let search_results_browser_clone = search_results_browser.clone();
-    let file_browser_clone_for_done_cb = file_browser.clone();
-    let search_results_browser_clone_for_done = search_results_browser.clone();
-    
-    register_all_callbacks(
-        wind,
-        &mut controls.main_vertical_flex.clone(),
-        &mut controls.menu_trigger_button.clone(), 
-        ui_state.is_menu_expanded.clone(), 
-        &mut controls.menu_items_panel_flex.clone(),
-        &mut controls.path_trigger_button.clone(), 
-        ui_state.is_path_panel_expanded.clone(), 
-        &mut controls.path_display_panel_flex.clone(),
-        &mut controls.settings_button.clone(),
-        &mut controls.unregister_button.clone(), 
-        &mut controls.about_button.clone(),
-        &mut controls.btn_choose_base.clone(), 
-        base_path_rc.clone(), 
-        file_browser_clone_for_base_cb, 
-        search_input_clone_for_base_cb,
-        &mut controls.btn_choose_anime.clone(), 
-        anime_path_rc.clone(),
-        &mut controls.search_input.clone(), 
-        &mut controls.search_button.clone(), 
-        ui_state.search_results_rc.clone(), 
-        search_results_browser_clone,
-        &mut search_results_browser.clone(), 
-        ui_state.search_results_rc.clone(), 
-        ui_state.episode_list_rc.clone(), 
-        ui_state.selected_anime_id_rc.clone(),
-        &mut file_browser.clone(),
-        &mut controls.btn_done.clone(), 
-        file_browser_clone_for_done_cb, 
-        ui_state.episode_list_rc.clone(), 
-        base_path_rc.clone(), 
-        anime_path_rc.clone(),
-        ui_state.search_results_rc.clone(), 
-        ui_state.selected_anime_id_rc.clone(), 
-        search_results_browser_clone_for_done,
-    );
-}
-
-/// 构建UI布局
-pub fn build_ui_layout(
-    wind: &mut Window,
-    btn_choose_base_ref: &Button, btn_choose_anime_ref: &Button, btn_done_ref: &Button,
-    search_input_ref: &Input, search_button_ref: &Button,
-    settings_button_ref: &Button, unregister_button_ref: &Button, about_button_ref: &Button,
-    file_browser: &mut FileBrowser, search_results_browser: &mut MultiBrowser,
-) -> (Flex, Button, Button, Flex, Flex) {
-    let mut main_vertical_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
-    main_vertical_flex.set_type(fltk::group::FlexType::Column);
-
-    let (menu_trigger_button, path_trigger_button, top_triggers_flex) =
-        setup_top_triggers_flex(btn_done_ref, search_input_ref, search_button_ref);
-    main_vertical_flex.add(&top_triggers_flex);
-    main_vertical_flex.fixed(&top_triggers_flex, MENU_TRIGGER_HEIGHT);
-
-    let menu_items_panel_flex =
-        setup_menu_items_panel(settings_button_ref, unregister_button_ref, about_button_ref);
-    main_vertical_flex.add(&menu_items_panel_flex);
-
-    let path_display_panel_flex = setup_path_display_panel(btn_choose_base_ref, btn_choose_anime_ref);
-    main_vertical_flex.add(&path_display_panel_flex);
-
-    let (content_flex, mut left_flex, mut right_flex) = setup_content_area();
-    left_flex.add(file_browser);
-    right_flex.add(search_results_browser);
-    main_vertical_flex.add(&content_flex);
-
-    main_vertical_flex.end();
-    wind.add(&main_vertical_flex);
-    wind.resizable(&main_vertical_flex);
-
-    (main_vertical_flex, menu_trigger_button, path_trigger_button, menu_items_panel_flex, path_display_panel_flex)
-}
-
-/// 初始化UI状态并应用命令行参数
-pub fn initialize_ui_state_and_apply_cli_args(
-    base_path_rc: &Rc<RefCell<Option<String>>>,
-    anime_path_rc: &Rc<RefCell<Option<String>>>,
-    btn_choose_base: &mut Button,
-    btn_choose_anime: &mut Button,
     file_browser: &mut FileBrowser,
     search_input: &mut Input,
-) -> (
-    Rc<RefCell<bool>>,
-    Rc<RefCell<bool>>,
-    Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
-    Rc<RefCell<Option<api::EpisodeCollection>>>,
-
-    Rc<RefCell<Option<String>>>,
-) {
+) -> UIState {
     let is_menu_expanded = Rc::new(RefCell::new(false));
     let is_path_panel_expanded = Rc::new(RefCell::new(false));
     let search_results_rc: Rc<RefCell<Option<Vec<api::BangumiSubject>>>> = Rc::new(RefCell::new(None));
@@ -332,7 +270,71 @@ pub fn initialize_ui_state_and_apply_cli_args(
         btn_choose_anime.set_label(&io::shorten_path_for_display(cli_anime_path_str, MAX_BUTTON_LABEL_LEN));
     }
 
-    (is_menu_expanded, is_path_panel_expanded, search_results_rc, episode_list_rc, selected_anime_id_rc)
+    // 创建UI状态结构体
+    UIState {
+        is_menu_expanded,
+        is_path_panel_expanded,
+        search_results_rc,
+        episode_list_rc,
+        selected_anime_id_rc,
+    }
+}
+
+/// 构建UI主布局
+#[allow(clippy::too_many_arguments)]
+fn build_ui_layout(
+    wind: &mut Window,
+    btn_choose_base: &Button, 
+    btn_choose_anime: &Button, 
+    btn_done: &Button, 
+    search_input: &Input, 
+    search_button: &Button,
+    settings_button: &Button, 
+    unregister_button: &Button, 
+    about_button: &Button,
+    file_browser: &mut FileBrowser, 
+    search_results_browser: &mut MultiBrowser,
+) -> (Flex, Button, Button, Flex, Flex) {
+    // 创建主垂直Flex布局
+    let mut main_vertical_flex = Flex::new(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, "");
+    main_vertical_flex.set_type(fltk::group::FlexType::Column);
+    
+    // 设置顶部触发器布局
+    let (menu_trigger_button, path_trigger_button, top_triggers_flex) = 
+        setup_top_triggers_flex(btn_done, search_input, search_button);
+    main_vertical_flex.add(&top_triggers_flex);
+    main_vertical_flex.fixed(&top_triggers_flex, MENU_TRIGGER_HEIGHT);
+    
+    // 设置菜单项面板
+    let menu_items_panel_flex = setup_menu_items_panel(settings_button, unregister_button, about_button);
+    main_vertical_flex.add(&menu_items_panel_flex);
+    main_vertical_flex.fixed(&menu_items_panel_flex, 35);
+    
+    // 设置路径显示面板
+    let path_display_panel_flex = setup_path_display_panel(btn_choose_base, btn_choose_anime);
+    main_vertical_flex.add(&path_display_panel_flex);
+    main_vertical_flex.fixed(&path_display_panel_flex, 35);
+    
+    // 设置内容区域
+    let (content_flex, mut left_flex, mut right_flex) = setup_content_area();
+    
+    // 添加浏览器到左右布局
+    left_flex.add(file_browser);
+    right_flex.add(search_results_browser);
+    
+    main_vertical_flex.add(&content_flex);
+    
+    main_vertical_flex.end();
+    wind.resizable(&main_vertical_flex); // 使窗口可调整大小，并让 main_vertical_flex 填充
+    wind.end();
+    
+    (
+        main_vertical_flex,
+        menu_trigger_button,
+        path_trigger_button,
+        menu_items_panel_flex,
+        path_display_panel_flex,
+    )
 }
 
 // --- UI 元素布局函数 ---
@@ -409,9 +411,10 @@ fn setup_content_area() -> (Flex, Flex, Flex) {
     (content_flex, left_flex, right_flex)
 }
 
-/// 注册所有回调
-#[allow(clippy::too_many_arguments)]
-pub fn register_all_callbacks(
+// --- 回调注册辅助函数 ---
+
+/// 注册菜单和路径面板的切换回调
+fn register_toggle_callbacks(
     wind: &mut Window,
     main_vertical_flex: &mut Flex,
     menu_trigger_button: &mut Button,
@@ -420,33 +423,8 @@ pub fn register_all_callbacks(
     path_trigger_button: &mut Button,
     is_path_panel_expanded: Rc<RefCell<bool>>,
     path_display_panel_flex: &mut Flex,
-    settings_button: &mut Button,
-    unregister_button: &mut Button,
-    about_button: &mut Button,
-    btn_choose_base: &mut Button,
-    base_path_rc: Rc<RefCell<Option<String>>>,
-    file_browser_for_b_cb: FileBrowser,
-    search_input_for_b_cb: Input,
-    btn_choose_anime: &mut Button,
-    anime_path_rc: Rc<RefCell<Option<String>>>,
-    search_input_for_search_cb: &mut Input,
-    search_button: &mut Button,
-    search_results_rc_for_search: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
-    search_results_browser_for_search_actions: MultiBrowser,
-    search_results_browser: &mut MultiBrowser,
-    search_results_rc_for_dblclick: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
-    episode_list_rc_for_dblclick: Rc<RefCell<Option<api::EpisodeCollection>>>,
-    selected_anime_id_rc_for_dblclick: Rc<RefCell<Option<String>>>,
-    file_browser: &mut FileBrowser,
-    btn_done: &mut Button,
-    file_browser_for_done_cb: FileBrowser,
-    episode_list_rc_for_done: Rc<RefCell<Option<api::EpisodeCollection>>>,
-    base_path_rc_for_done: Rc<RefCell<Option<String>>>,
-    anime_path_rc_for_done: Rc<RefCell<Option<String>>>,
-    search_results_rc_for_done: Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
-    selected_anime_id_rc_for_done: Rc<RefCell<Option<String>>>,
-    search_results_browser_for_done_cb: MultiBrowser,
-) {    // Menu Toggle Callback
+) {
+    // 菜单切换回调
     let is_menu_expanded_cb = is_menu_expanded.clone();
     let mut main_flex_cb_menu = main_vertical_flex.clone();
     let mut menu_panel_cb_menu = menu_items_panel_flex.clone();
@@ -458,7 +436,9 @@ pub fn register_all_callbacks(
             &mut menu_panel_cb_menu,
             &mut wind_cb_menu,
         );
-    });    // Path Panel Toggle Callback
+    });
+
+    // 路径面板切换回调
     let is_path_panel_expanded_cb = is_path_panel_expanded.clone();
     let mut main_flex_cb_path = main_vertical_flex.clone();
     let mut path_panel_cb_path = path_display_panel_flex.clone();
@@ -471,81 +451,143 @@ pub fn register_all_callbacks(
             &mut wind_cb_path,
         );
     });
+}
 
-    // Menu Item Callbacks
+/// 注册菜单项按钮的回调
+fn register_menu_item_callbacks(
+    settings_button: &mut Button,
+    unregister_button: &mut Button,
+    about_button: &mut Button,
+) {
     settings_button.set_callback(|_| ui_core::handle_register_context_menu());
     unregister_button.set_callback(|_| ui_core::handle_unregister_context_menu());
     about_button.set_callback(|_| ui_core::handle_about_button());
+}
 
-    // Path Choose Callbacks
-    let base_path_cb_b = base_path_rc.clone();
-    let btn_choose_base_cb_b = btn_choose_base.clone();
+/// 注册路径选择按钮的回调
+fn register_path_selection_callbacks(
+    btn_choose_base: &mut Button,
+    base_path_rc: &Rc<RefCell<Option<String>>>,
+    file_browser: &FileBrowser, // 接收引用，在闭包中克隆
+    search_input: &Input,       // 接收引用，在闭包中克隆
+    btn_choose_anime: &mut Button,
+    anime_path_rc: &Rc<RefCell<Option<String>>>,
+) {
+    // "选择基本路径" 按钮回调
+    let base_path_rc_clone = base_path_rc.clone();
+    let btn_choose_base_clone = btn_choose_base.clone();
+    let file_browser_clone = file_browser.clone();
+    let search_input_clone = search_input.clone();
     btn_choose_base.set_callback(move |_| {
         ui_core::handle_choose_base_path_callback(
-            base_path_cb_b.clone(),
-            btn_choose_base_cb_b.clone(),
-            file_browser_for_b_cb.clone(),
-            search_input_for_b_cb.clone(),
+            base_path_rc_clone.clone(),
+            btn_choose_base_clone.clone(),
+            file_browser_clone.clone(),
+            search_input_clone.clone(),
         );
     });
 
-    let anime_path_cb_a = anime_path_rc.clone();
-    let btn_choose_anime_cb_a = btn_choose_anime.clone();
+    // "选择番剧路径" 按钮回调
+    let anime_path_rc_clone = anime_path_rc.clone();
+    let btn_choose_anime_clone = btn_choose_anime.clone();
     btn_choose_anime.set_callback(move |_| {
         ui_core::handle_choose_anime_path_callback(
-            anime_path_cb_a.clone(),
-            btn_choose_anime_cb_a.clone(),
+            anime_path_rc_clone.clone(),
+            btn_choose_anime_clone.clone(),
+        );
+    });
+}
+
+/// 注册搜索相关控件的回调
+fn register_search_callbacks(
+    search_input: &mut Input,
+    search_button: &mut Button,
+    search_results_rc: &Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
+    search_results_browser: &MultiBrowser, // 接收引用，在闭包中克隆
+) {
+    // 搜索按钮回调
+    let search_input_clone_btn = search_input.clone();
+    let search_results_rc_clone_btn = search_results_rc.clone();
+    let srb_clone_btn = search_results_browser.clone();
+    search_button.set_callback(move |_| {
+        ui_core::handle_search_button_callback(
+            search_input_clone_btn.clone(),
+            search_results_rc_clone_btn.clone(),
+            srb_clone_btn.clone(),
         );
     });
 
-    // Search Callbacks
-    let search_input_cb_search_btn = search_input_for_search_cb.clone();
-    let search_results_cb_search_btn = search_results_rc_for_search.clone();
-    let srb_for_search_button_closure = search_results_browser_for_search_actions.clone();
-    search_button.set_callback(move |_| {
-        ui_core::handle_search_button_callback(
-            search_input_cb_search_btn.clone(),
-            search_results_cb_search_btn.clone(),
-            srb_for_search_button_closure.clone(),
-        );
-    });    let search_input_cb_enter = search_input_for_search_cb.clone();
-    let search_results_cb_enter = search_results_rc_for_search.clone();
-    search_input_for_search_cb.handle(move |_, ev| {
+    // 搜索输入框回车键回调
+    let search_input_clone_enter = search_input.clone();
+    let search_results_rc_clone_enter = search_results_rc.clone();
+    let srb_clone_enter = search_results_browser.clone();
+    search_input.handle(move |_, ev| {
         if ev == Event::KeyDown && app::event_key() == Key::Enter {
             return ui_core::handle_search_input_enter_key(
-                search_input_cb_enter.clone(),
-                search_results_cb_enter.clone(),
-                search_results_browser_for_search_actions.clone(),
+                search_input_clone_enter.clone(),
+                search_results_rc_clone_enter.clone(),
+                srb_clone_enter.clone(),
             );
         }
         false
     });
+}
 
-    // Search Results Browser Callback
+/// 注册文件浏览器和搜索结果浏览器的事件回调
+fn register_browser_event_callbacks(
+    file_browser: &mut FileBrowser,
+    search_results_browser: &mut MultiBrowser,
+    search_results_rc: &Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
+    episode_list_rc: &Rc<RefCell<Option<api::EpisodeCollection>>>,
+    selected_anime_id_rc: &Rc<RefCell<Option<String>>>,
+) {
+    // 搜索结果浏览器双击回调
+    let search_results_rc_clone = search_results_rc.clone();
+    let episode_list_rc_clone = episode_list_rc.clone();
+    let selected_anime_id_rc_clone = selected_anime_id_rc.clone();
     search_results_browser.set_callback(move |b| {
         ui_core::handle_search_results_double_click(
             b,
-            search_results_rc_for_dblclick.clone(),
-            episode_list_rc_for_dblclick.clone(),
-            selected_anime_id_rc_for_dblclick.clone(),
+            search_results_rc_clone.clone(),
+            episode_list_rc_clone.clone(),
+            selected_anime_id_rc_clone.clone(),
         );
     });
 
-    // File Browser Callback
+    // 文件浏览器事件回调
     file_browser.handle(move |b, ev| {
         ui_core::handle_file_browser_events(b, ev)
     });
+}
 
-    // Done Button Callback
+/// 注册 "完成" 按钮的回调
+fn register_done_button_callback(
+    btn_done: &mut Button,
+    file_browser: &FileBrowser, // 接收引用
+    episode_list_rc: &Rc<RefCell<Option<api::EpisodeCollection>>>,
+    base_path_rc: &Rc<RefCell<Option<String>>>,
+    anime_path_rc: &Rc<RefCell<Option<String>>>,
+    search_results_rc: &Rc<RefCell<Option<Vec<api::BangumiSubject>>>>,
+    selected_anime_id_rc: &Rc<RefCell<Option<String>>>,
+    search_results_browser: &MultiBrowser, // 接收引用
+) {
+    let fb_clone = file_browser.clone();
+    let el_rc_clone = episode_list_rc.clone();
+    let bp_rc_clone = base_path_rc.clone();
+    let ap_rc_clone = anime_path_rc.clone();
+    let sr_rc_clone = search_results_rc.clone();
+    let said_rc_clone = selected_anime_id_rc.clone();
+    let srb_clone = search_results_browser.clone();
+
     btn_done.set_callback(move |_| {
         ui_core::handle_done_button_callback(
-            file_browser_for_done_cb.clone(),
-            episode_list_rc_for_done.clone(),
-            base_path_rc_for_done.clone(),
-            anime_path_rc_for_done.clone(),
-            search_results_rc_for_done.clone(),
-            selected_anime_id_rc_for_done.clone(),
-            search_results_browser_for_done_cb.clone(),
+            fb_clone.clone(),
+            el_rc_clone.clone(),
+            bp_rc_clone.clone(),
+            ap_rc_clone.clone(),
+            sr_rc_clone.clone(),
+            said_rc_clone.clone(),
+            srb_clone.clone(),
         );
     });
 }
