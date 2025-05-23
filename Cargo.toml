@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-fltk = { version = "^1.5", features = ["fltk-bundled"] }
+fltk =  "^1.5"
 clap = { version = "^4.0", features = ["derive"] }
 miniserde = "^0.1"
 minreq = { version = "^2", features = ["https-rustls-probe"] }
@@ -15,6 +15,7 @@ webbrowser = "1.0.4"
 winreg = "0.55.0"
 natord = "^1.0"
 uuid = { version = "^1.0", features = ["v4"] }
+regex = "1.11.1"
 
 [build-dependencies]
 embed-resource = "3.0.2"
