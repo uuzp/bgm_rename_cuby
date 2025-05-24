@@ -93,15 +93,10 @@ impl Cuby {
         
         let mut search_browser = HoldBrowser::default();
         search_browser.set_selection_color(enums::Color::from_rgb(255, 255, 180)); // 设置为醒目的浅黄色
-        
-        mid_flex.fixed(&search_browser, 400);
-        mid_flex.end();
-        
-        // 下区域：路径信息Frame和开始按钮
-        let mut bottom_flex = Flex::default().row();
-        
-        let mut info_frame = Frame::default().with_label("");
-        info_frame.set_align(enums::Align::Left);
+          mid_flex.fixed(&search_browser, 400);
+        mid_flex.end();          // 下区域：路径信息Frame和开始按钮
+        let mut bottom_flex = Flex::default().row();        let mut info_frame = Frame::default().with_label("就绪 - 请选择文件夹");
+        info_frame.set_align(enums::Align::Left | enums::Align::Inside);
         
         // 创建一个垂直布局来包含按钮和底部边距
         let mut btn_container = Flex::default().column();
@@ -110,9 +105,7 @@ impl Cuby {
         
         let bottom_margin = Frame::default();
         btn_container.fixed(&bottom_margin, 2);
-        btn_container.end();
-        
-        // 添加一个空白 Frame 作为右侧边距
+        btn_container.end();        // 添加一个空白 Frame 作为右侧边距
         let right_margin = Frame::default();
         
         // 固定宽度
@@ -127,6 +120,14 @@ impl Cuby {
         wind.resizable(&main_flex);
         wind.end();
         wind.show();
+          // 设置浏览器的回调函数来处理点击事件
+        file_browser.set_callback(move |_| {
+            // 这里可以发送一个消息来更新信息显示
+        });
+        
+        search_browser.set_callback(move |_| {
+            // 这里可以发送一个消息来更新信息显示
+        });
         
         Self {
             app,
@@ -136,6 +137,49 @@ impl Cuby {
             search_input,
             info_frame,
             receiver,
+        }
+    }
+
+    /// 内部鼠标事件处理方法
+    fn handle_mouse_events_internal(&mut self) {
+        let event = app::event();        // 只在相关事件时处理，减少频繁触发
+        if matches!(event, Event::Enter | Event::Push) {
+            if let Some(widget) = app::belowmouse::<HoldBrowser>() {
+                if widget.as_widget_ptr() == self.file_browser.as_widget_ptr() {                    // 鼠标在文件列表，显示base_path
+                    if let Some(mutex) = BASE_PATH.get() {
+                        if let Ok(base_path) = mutex.lock() {
+                            if !base_path.is_empty() {
+                                let display_text = format!("Base Path: {}", base_path);
+                                self.info_frame.set_label(&display_text);
+                            } else {
+                                self.info_frame.set_label("Base Path: 未设置 - 请点击按钮B选择路径");
+                            }
+                        } else {
+                            self.info_frame.set_label("Base Path: 锁定失败");
+                        }
+                    } else {
+                        self.info_frame.set_label("Base Path: 未初始化 - 请点击按钮B选择路径");
+                    }
+                    self.info_frame.redraw();
+                    self.wind.redraw();
+                } else if widget.as_widget_ptr() == self.search_browser.as_widget_ptr() {                    // 鼠标在搜索列表，显示anime_path
+                    if let Some(mutex) = ANIME_PATH.get() {
+                        if let Ok(anime_path) = mutex.lock() {
+                            if !anime_path.is_empty() {
+                                let display_text = format!("Anime Path: {}", anime_path);
+                                self.info_frame.set_label(&display_text);
+                            } else {
+                                self.info_frame.set_label("Anime Path: 未设置 - 请点击按钮A选择路径");
+                            }
+                        } else {
+                            self.info_frame.set_label("Anime Path: 锁定失败");
+                        }
+                    } else {
+                        self.info_frame.set_label("Anime Path: 未初始化 - 请点击按钮A选择路径");
+                    }
+                    self.info_frame.redraw();
+                    self.wind.redraw();}
+            }
         }
     }
 
@@ -155,28 +199,38 @@ impl Cuby {
                     Message::Exit => {
                         self.wind.hide();
                         break;
-                    },
-                    Message::ButtonA => {
+                    },                    Message::ButtonA => {
                         update_path(&ANIME_PATH,"select anime_path");
-                    },
-                    Message::ButtonB => {
+                        if let Some(mutex) = ANIME_PATH.get() {
+                            if let Ok(anime_path) = mutex.lock() {
+                                self.info_frame.set_label(&format!("Anime Path: {}", anime_path));
+                                self.info_frame.redraw();
+                                self.wind.redraw();
+                            }
+                        }
+                    },                    Message::ButtonB => {
                         update_path(&BASE_PATH,"select base_path");
                         
                         if let Some(mutex) = BASE_PATH.get() {
                             if let Ok(base_path) = mutex.lock() {
+                                self.info_frame.set_label(&format!("Base Path: {}", base_path));
+                                self.info_frame.redraw();
+                                self.wind.redraw();
                                 load_files_to_file_browser(&base_path, &mut self.file_browser);
                             }
                         }
-                    },
-                    Message::Search => {
+                    },Message::Search => {
                         let query = self.search_input.value();
                         self.info_frame.set_label(&format!("搜索: {}", query));
+                        self.info_frame.redraw();
+                        self.wind.redraw();
                     },
                     Message::Start => {
                         self.info_frame.set_label("开始处理");
+                        self.info_frame.redraw();
+                        self.wind.redraw();
                     },
-                }
-            } else {
+                }            } else {
                 // 如果没有消息，检查是否有 file_browser 的事件
                 if let Some(widget) = app::belowmouse::<HoldBrowser>() {
                     if widget.as_widget_ptr() == self.file_browser.as_widget_ptr() {
@@ -188,6 +242,9 @@ impl Cuby {
                         }
                     }
                 }
+                
+                // 检查鼠标事件并更新路径信息显示
+                self.handle_mouse_events_internal();
             }
         }
     }
@@ -198,7 +255,6 @@ fn main() {
     app.run();
 }
 // 
-use std::path::{self, Component, Path};
 use std::env;
 use winreg::enums::*; 
 use winreg::RegKey;
@@ -455,9 +511,8 @@ fn handle_browser_released_event(drag_item_ptr: *mut i32) -> bool {
 
 /// 处理文件浏览器事件
 pub fn handle_browser_events(browser: &mut HoldBrowser, event: Event) -> bool {
-    // 使用静态变量来跟踪拖放项和高亮行
+    // 使用静态变量来跟踪拖放项
     static mut DRAG_ITEM: i32 = -1;
-    static mut HIGHLIGHTED_LINE: i32 = -1;
     
     match event {
         Event::Drag => handle_browser_drag_event(browser, std::ptr::addr_of_mut!(DRAG_ITEM)),
