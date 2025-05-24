@@ -19,7 +19,6 @@ use clap::Parser;
 
 // 引入模块
 mod bangumi_api;
-mod io;
 
 static BASE_PATH: OnceLock<Mutex<String>> = OnceLock::new();
 static ANIME_PATH: OnceLock<Mutex<String>> = OnceLock::new();
@@ -417,10 +416,8 @@ impl Cuby {
         if self.episode_list.borrow().is_none() {
             self.info_frame.set_label("错误: 请先搜索并选择番剧");
             return;
-        }
-
-        // 验证路径
-        let (base_path_str, anime_path_str) = match io::validate_operation_paths(&self.base_path, &self.anime_path) {
+        }        // 验证路径
+        let (base_path_str, anime_path_str) = match validate_operation_paths(&self.base_path, &self.anime_path) {
             Ok((base, anime)) => (base, anime),
             Err(err) => {
                 self.info_frame.set_label(&err);
@@ -515,7 +512,7 @@ impl Cuby {
         }
     }    /// 准备目标目录
     fn prepare_target_directory(&self, anime_path_root_str: &str, anime_display_name: &str, year: &str) -> Result<std::path::PathBuf, String> {
-        let cleaned_anime_name_for_folder = io::replace_invalid_chars(anime_display_name);
+        let cleaned_anime_name_for_folder = replace_invalid_chars(anime_display_name);
         let target_anime_folder_name = format!("{}({})", cleaned_anime_name_for_folder, year);
         let target_anime_dir = std::path::Path::new(anime_path_root_str).join(target_anime_folder_name);
 
@@ -558,7 +555,7 @@ impl Cuby {
 
             let source_file_path = std::path::Path::new(base_path_str).join(source_file_name_str);
             let original_extension = source_file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-              let cleaned_episode_name_part = io::replace_invalid_chars(&formatted_episode_names[i]);
+              let cleaned_episode_name_part = replace_invalid_chars(&formatted_episode_names[i]);
             let new_file_name_str = if original_extension.is_empty() {
                 cleaned_episode_name_part.clone()
             } else {
@@ -897,4 +894,126 @@ mod tests {
             assert_eq!(result, expected, "提取失败，输入: {}", input);
         }
     }
+}
+
+/// 验证操作路径
+pub fn validate_operation_paths(base_path_rc: &std::rc::Rc<std::cell::RefCell<Option<String>>>, anime_path_rc: &std::rc::Rc<std::cell::RefCell<Option<String>>>) -> Result<(String, String), String> {
+    let base_path_str = match base_path_rc.borrow().as_ref() {
+        Some(path) => path.clone(),
+        None => { return Err("错误: 未设置源文件路径（B按钮）".to_string()); }
+    };
+    let anime_path_str = match anime_path_rc.borrow().as_ref() {
+        Some(path) => path.clone(),
+        None => { return Err("错误: 未设置目标位置路径（A按钮）".to_string()); }
+    };
+    Ok((base_path_str, anime_path_str))
+}
+
+/// 替换文件名中的特殊字符
+pub fn replace_invalid_chars(s: &str) -> String {
+    s.replace("/", "／")
+     .replace("\\", "＼") // Note: in a regular string, this would be a single backslash.
+     .replace("<", "＜")
+     .replace(">", "＞")
+     // Consider adding other common problematic characters like : * ? " |
+     .replace(":", "：")
+     .replace("*", "＊")
+     .replace("?", "？")
+     .replace("\"", "＂")
+     .replace("|", "｜")
+}
+
+/// 从路径中提取番剧名的函数
+pub fn extract_anime_name_from_path(path_str: &str) -> Option<String> {
+    let path = std::path::Path::new(path_str);
+    let dir_name = path.file_name()?.to_str()?;
+
+    // 优先尝试从带标签的格式提取
+    if let Some(name) = extract_from_tagged_format(dir_name) {
+        return Some(name);
+    }
+
+    // 回退到简单格式
+    extract_from_simple_format(dir_name)
+}
+
+/// 从带标签的格式提取番剧名，例如 [组名][状态]番剧名
+fn extract_from_tagged_format(dir_name: &str) -> Option<String> {
+    if !dir_name.starts_with('[') {
+        return None;
+    }
+    
+    // 确定要提取的部分索引
+    let cont = if dir_name.len() >= 5 && 
+               (dir_name[1..4].eq_ignore_ascii_case("rev") || 
+                dir_name[1..4].eq_ignore_ascii_case("raw")) && 
+               dir_name.chars().nth(4) == Some(']') {
+        3 // 对应 [rev][组名]番剧名 或 [raw][组名]番剧名 格式
+    } else {
+        2 // 对应 [组名][状态]番剧名 格式
+    };
+
+    // 分割字符串并提取相应部分
+    let parts: Vec<String> = dir_name
+        .replace(']', "[") // 统一分隔符
+        .split('[')
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .collect();
+
+    // 确保有足够的部分且索引有效
+    if parts.len() >= cont {
+        Some(parts[cont - 1].clone())
+    } else {
+        None
+    }
+}
+
+/// 从简单格式提取番剧名，例如 番剧名_其他信息
+fn extract_from_simple_format(dir_name: &str) -> Option<String> {
+    dir_name
+        .split('_')
+        .next()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 缩短路径以便在UI上显示
+pub fn shorten_path_for_display(path_str: &str, max_len: usize) -> String {
+    if path_str.is_empty() {
+        return "".to_string();
+    }
+    if path_str.chars().count() <= max_len {
+        return path_str.to_string();
+    }
+
+    let ellipsis = "...";
+    let ellipsis_len = ellipsis.chars().count();
+
+    // 如果 max_len 太小，无法容纳省略号，则直接从开头截取
+    if max_len <= ellipsis_len {
+        return path_str.chars().take(max_len).collect();
+    }
+
+    let path = std::path::Path::new(path_str);
+    let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let filename_len = filename.chars().count();
+
+    // 尝试格式: "start...filename"
+    // 条件：文件名非空，并且 max_len 足够容纳 "至少一个字符的start" + "..." + "filename"
+    if !filename.is_empty() && max_len > filename_len + ellipsis_len {
+        let space_for_start = max_len - filename_len - ellipsis_len;
+        // 确保 start_part 不会与 filename 重叠（如果路径很短，这由初始的长度检查处理）
+        // path_str.chars().count() > max_len 保证了这一点
+        let start_part: String = path_str.chars().take(space_for_start).collect();
+        return format!("{}{}{}", start_part, ellipsis, filename);
+    }
+
+    // 回退格式: "...end_of_path"
+    // (如果文件名太长，或者 "start...filename" 格式不适用)
+    let chars_to_take_from_end = max_len - ellipsis_len;
+    let path_chars_count = path_str.chars().count();
+    let skip_count = path_chars_count.saturating_sub(chars_to_take_from_end);
+    let end_part: String = path_str.chars().skip(skip_count).collect();
+    format!("{}{}", ellipsis, end_part)
 }
