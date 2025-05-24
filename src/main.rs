@@ -452,9 +452,7 @@ impl Cuby {
                 self.info_frame.set_label(&err);
                 return;
             }
-        };
-
-        // 执行重命名
+        };        // 执行硬链接
         let formatted_episode_names = ep_collection.get_formatted_names();
         let (successful, failed, errors) = self.execute_file_renaming(
             &source_files,
@@ -468,12 +466,11 @@ impl Cuby {
         
         // 显示结果
         self.display_rename_summary(successful, failed, &errors);
-        
-        // 更新状态信息
+          // 更新状态信息
         if failed == 0 {
-            self.info_frame.set_label(&format!("重命名完成: {} 个文件成功", successful));
+            self.info_frame.set_label(&format!("硬链接完成: {} 个文件成功", successful));
         } else {
-            self.info_frame.set_label(&format!("重命名完成: {} 成功, {} 失败", successful, failed));
+            self.info_frame.set_label(&format!("硬链接完成: {} 成功, {} 失败", successful, failed));
         }
     }    /// 获取选定的番剧名称和年份
     fn get_selected_anime_details(&self, ep_collection: &bangumi_api::EpisodeCollection) -> Result<(String, String), String> {
@@ -516,18 +513,15 @@ impl Cuby {
             .map_err(|e| format!("错误: 创建目标文件夹失败: {}", e))?;
         
         Ok(target_anime_dir)
-    }
-
-    /// 执行文件重命名
+    }    /// 执行文件硬链接
     fn execute_file_renaming(
         &self,
         source_files: &[String],
         base_path_str: &str,
         formatted_episode_names: &[String],
-        target_anime_dir: &std::path::Path,
-    ) -> (usize, usize, Vec<String>) {
-        let mut successful_renames = 0;
-        let mut failed_renames = 0;
+        target_anime_dir: &std::path::Path,    ) -> (usize, usize, Vec<String>) {
+        let mut successful_links = 0;
+        let mut failed_links = 0;
         let mut errors_log = Vec::new();
 
         if source_files.len() > formatted_episode_names.len() {
@@ -535,10 +529,9 @@ impl Cuby {
                 "警告: 选择的文件数量 ({}) 多于剧集数量 ({}). 是否继续?",
                 source_files.len(),
                 formatted_episode_names.len()
-            );
-            if dialog::choice2_default(&msg, "继续", "取消", "") != Some(0) {
+            );            if dialog::choice2_default(&msg, "继续", "取消", "") != Some(0) {
                 errors_log.push("操作被用户取消：文件数量多于剧集数量".to_string());
-                return (successful_renames, failed_renames, errors_log);
+                return (successful_links, failed_links, errors_log);
             }
         }
 
@@ -565,31 +558,27 @@ impl Cuby {
                 errors_log.push(msg);
                 continue;
             }
-            
-            if target_file_path.exists() {
+              if target_file_path.exists() {
                 let msg = format!("跳过文件 '{}': 目标已存在", source_file_name_str);
                 errors_log.push(msg);
-                failed_renames += 1;
+                failed_links += 1;
                 continue;
             }
 
-            match std::fs::rename(&source_file_path, &target_file_path) {
+            match std::fs::hard_link(&source_file_path, &target_file_path) {
                 Ok(_) => {
-                    successful_renames += 1;
-                }
-                Err(e) => {
+                    successful_links += 1;
+                }Err(e) => {
                     let err_msg = format!("失败: '{}', 错误: {}", source_file_name_str, e);
                     errors_log.push(err_msg);
-                    failed_renames += 1;
+                    failed_links += 1;
                 }
             }
         }
-        (successful_renames, failed_renames, errors_log)
-    }
-
-    /// 显示重命名操作总结
-    fn display_rename_summary(&self, successful_renames: usize, failed_renames: usize, errors_log: &[String]) {
-        let mut summary_message = format!("重命名完成报告:\n成功: {}\n失败: {}", successful_renames, failed_renames);
+        (successful_links, failed_links, errors_log)
+    }    /// 显示硬链接操作总结
+    fn display_rename_summary(&self, successful_links: usize, failed_links: usize, errors_log: &[String]) {
+        let mut summary_message = format!("硬链接完成报告:\n成功: {}\n失败: {}", successful_links, failed_links);
         if !errors_log.is_empty() {
             summary_message.push_str("\n\n详细信息:\n");
             summary_message.push_str(&errors_log.join("\n"));
