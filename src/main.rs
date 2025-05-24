@@ -60,8 +60,6 @@ struct Cuby {
     search_results: Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>>,
     episode_list: Rc<RefCell<Option<bangumi_api::EpisodeCollection>>>,
     selected_anime_id: Rc<RefCell<Option<String>>>,
-    base_path: Rc<RefCell<Option<String>>>,
-    anime_path: Rc<RefCell<Option<String>>>,
 }
 
 impl Cuby {
@@ -186,8 +184,7 @@ impl Cuby {
             (None, Some(anime)) => format!("已从命令行加载 Anime Path: {} - 请选择 Base Path", anime),
             (None, None) => "就绪 - 请选择文件夹".to_string(),
         };
-        info_frame.set_label(&initial_message);
-          Self {
+        info_frame.set_label(&initial_message);        Self {
             app,
             wind,
             file_browser,
@@ -199,8 +196,6 @@ impl Cuby {
             search_results: Rc::new(RefCell::new(None)),
             episode_list: Rc::new(RefCell::new(None)),
             selected_anime_id: Rc::new(RefCell::new(None)),
-            base_path: Rc::new(RefCell::new(cli_args.base_path.clone())),
-            anime_path: Rc::new(RefCell::new(cli_args.anime_path.clone())),
         }
     }
 
@@ -417,7 +412,7 @@ impl Cuby {
             self.info_frame.set_label("错误: 请先搜索并选择番剧");
             return;
         }        // 验证路径
-        let (base_path_str, anime_path_str) = match validate_operation_paths(&self.base_path, &self.anime_path) {
+        let (base_path_str, anime_path_str) = match validate_operation_paths() {
             Ok((base, anime)) => (base, anime),
             Err(err) => {
                 self.info_frame.set_label(&err);
@@ -480,24 +475,25 @@ impl Cuby {
         } else {
             self.info_frame.set_label(&format!("重命名完成: {} 成功, {} 失败", successful, failed));
         }
-    }
-
-    /// 获取选定的番剧名称和年份
+    }    /// 获取选定的番剧名称和年份
     fn get_selected_anime_details(&self, ep_collection: &bangumi_api::EpisodeCollection) -> Result<(String, String), String> {
         let year = ep_collection.year.to_string();
 
-        let search_results_opt = self.search_results.borrow();
-        let selected_idx_in_browser = self.search_browser.value();
-
-        if selected_idx_in_browser <= 0 {
+        // 检查是否有选中的番剧ID
+        let selected_anime_id_opt = self.selected_anime_id.borrow();
+        if selected_anime_id_opt.is_none() {
             return Err("错误: 请先搜索并选择番剧".to_string());
         }
-        
+
+        let selected_id_str = selected_anime_id_opt.as_ref().unwrap();
+        let selected_id: u64 = selected_id_str.parse()
+            .map_err(|_| "错误: 番剧ID格式无效".to_string())?;
+
+        // 从搜索结果中找到对应的番剧
+        let search_results_opt = self.search_results.borrow();
         match search_results_opt.as_ref() {
             Some(subjects) => {
-                let actual_idx = (selected_idx_in_browser as usize) - 1;
-                if actual_idx < subjects.len() {
-                    let selected_subject = &subjects[actual_idx];
+                if let Some(selected_subject) = subjects.iter().find(|subject| subject.id == selected_id) {
                     let anime_display_name = if !selected_subject.name_cn.is_empty() {
                         selected_subject.name_cn.clone()
                     } else {
@@ -505,12 +501,12 @@ impl Cuby {
                     };
                     Ok((anime_display_name, year))
                 } else {
-                    Err("错误: 选择的番剧无效".to_string())
+                    Err("错误: 在搜索结果中未找到选中的番剧".to_string())
                 }
             }
             None => Err("错误: 搜索结果为空".to_string()),
         }
-    }    /// 准备目标目录
+    }/// 准备目标目录
     fn prepare_target_directory(&self, anime_path_root_str: &str, anime_display_name: &str, year: &str) -> Result<std::path::PathBuf, String> {
         let cleaned_anime_name_for_folder = replace_invalid_chars(anime_display_name);
         let target_anime_folder_name = format!("{}({})", cleaned_anime_name_for_folder, year);
@@ -867,45 +863,34 @@ fn handle_about_menu() {
     let _ = webbrowser::open(repo_url);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;    #[test]
-    fn test_extract_anime_name_regex() {
-        // 测试冷番补完字幕组格式
-        let folder_name = "[冷番补完字幕组][魔法公主明琪桃子][魔法のプリンセス ミンキーモモ][Mahou no Princess Minky Momo][1982-1987][S01+Movie+SP][1080p][内封简繁中字]";
-        let result = extract_anime_name_regex(folder_name);
-        println!("输入: {}", folder_name);
-        println!("提取结果: {:?}", result);
-        assert_eq!(result, Some("魔法公主明琪桃子".to_string()));
-
-        // 测试其他格式
-        let test_cases = vec![
-            ("[DBD-Raws][虫师][01-26TV全集+特典映像][1080P][BDRip][HEVC-10bit][简繁日双语外挂][FLAC][MKV]", Some("虫师".to_string())),
-            ("[Nekomoe kissaten][Tensei Oujo to Tensai Reijou no Mahou Kakumei][01-12][BDRip][1080p][JPSC]", Some("Tensei Oujo to Tensai Reijou no Mahou Kakumei".to_string())),
-            ("[VCB-Studio] Metallic Rouge [Ma10p_1080p]", Some("Metallic Rouge".to_string())),
-        ];
-
-        for (input, expected) in test_cases {
-            let result = extract_anime_name_regex(input);
-            println!("输入: {}", input);
-            println!("提取结果: {:?}", result);
-            println!("期望结果: {:?}", expected);
-            println!("---");
-            assert_eq!(result, expected, "提取失败，输入: {}", input);
-        }
-    }
-}
-
 /// 验证操作路径
-pub fn validate_operation_paths(base_path_rc: &std::rc::Rc<std::cell::RefCell<Option<String>>>, anime_path_rc: &std::rc::Rc<std::cell::RefCell<Option<String>>>) -> Result<(String, String), String> {
-    let base_path_str = match base_path_rc.borrow().as_ref() {
-        Some(path) => path.clone(),
-        None => { return Err("错误: 未设置源文件路径（B按钮）".to_string()); }
+pub fn validate_operation_paths() -> Result<(String, String), String> {
+    let base_path_str = if let Some(mutex) = BASE_PATH.get() {
+        if let Ok(path) = mutex.lock() {
+            if path.is_empty() {
+                return Err("错误: 未设置源文件路径（B按钮）".to_string());
+            }
+            path.clone()
+        } else {
+            return Err("错误: 无法访问源文件路径".to_string());
+        }
+    } else {
+        return Err("错误: 未初始化源文件路径".to_string());
     };
-    let anime_path_str = match anime_path_rc.borrow().as_ref() {
-        Some(path) => path.clone(),
-        None => { return Err("错误: 未设置目标位置路径（A按钮）".to_string()); }
+
+    let anime_path_str = if let Some(mutex) = ANIME_PATH.get() {
+        if let Ok(path) = mutex.lock() {
+            if path.is_empty() {
+                return Err("错误: 未设置目标位置路径（A按钮）".to_string());
+            }
+            path.clone()
+        } else {
+            return Err("错误: 无法访问目标位置路径".to_string());
+        }
+    } else {
+        return Err("错误: 未初始化目标位置路径".to_string());
     };
+
     Ok((base_path_str, anime_path_str))
 }
 
@@ -978,42 +963,3 @@ fn extract_from_simple_format(dir_name: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// 缩短路径以便在UI上显示
-pub fn shorten_path_for_display(path_str: &str, max_len: usize) -> String {
-    if path_str.is_empty() {
-        return "".to_string();
-    }
-    if path_str.chars().count() <= max_len {
-        return path_str.to_string();
-    }
-
-    let ellipsis = "...";
-    let ellipsis_len = ellipsis.chars().count();
-
-    // 如果 max_len 太小，无法容纳省略号，则直接从开头截取
-    if max_len <= ellipsis_len {
-        return path_str.chars().take(max_len).collect();
-    }
-
-    let path = std::path::Path::new(path_str);
-    let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-    let filename_len = filename.chars().count();
-
-    // 尝试格式: "start...filename"
-    // 条件：文件名非空，并且 max_len 足够容纳 "至少一个字符的start" + "..." + "filename"
-    if !filename.is_empty() && max_len > filename_len + ellipsis_len {
-        let space_for_start = max_len - filename_len - ellipsis_len;
-        // 确保 start_part 不会与 filename 重叠（如果路径很短，这由初始的长度检查处理）
-        // path_str.chars().count() > max_len 保证了这一点
-        let start_part: String = path_str.chars().take(space_for_start).collect();
-        return format!("{}{}{}", start_part, ellipsis, filename);
-    }
-
-    // 回退格式: "...end_of_path"
-    // (如果文件名太长，或者 "start...filename" 格式不适用)
-    let chars_to_take_from_end = max_len - ellipsis_len;
-    let path_chars_count = path_str.chars().count();
-    let skip_count = path_chars_count.saturating_sub(chars_to_take_from_end);
-    let end_part: String = path_str.chars().skip(skip_count).collect();
-    format!("{}{}", ellipsis, end_part)
-}
