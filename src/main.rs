@@ -1,5 +1,5 @@
 use fltk::dialog;
-use fltk::enums::{Event, Key};
+use fltk::enums::Event;
 use fltk::{
     app,
     browser::HoldBrowser,
@@ -13,9 +13,23 @@ use fltk::{
     window::Window,
 };
 use std::sync::{Mutex, OnceLock};
+use clap::Parser;
 
 static BASE_PATH: OnceLock<Mutex<String>> = OnceLock::new();
 static ANIME_PATH: OnceLock<Mutex<String>> = OnceLock::new();
+
+// --- 命令行参数定义 ---
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about, long_about = None)]
+pub struct CliArgs {
+    /// 源文件路径（包含视频文件的文件夹）
+    #[arg(short = 'b', long)]
+    pub base_path: Option<String>,
+
+    /// 目标文件路径（重命名后文件存放的文件夹）
+    #[arg(short = 'a', long)]
+    pub anime_path: Option<String>,
+}
 
 #[derive(Copy, Clone)]
 enum Message {
@@ -40,7 +54,7 @@ struct Cuby {
 }
 
 impl Cuby {
-    pub fn new() -> Self {
+    pub fn new(cli_args: &CliArgs) -> Self {
         // 创建应用和窗口
         let app = app::App::default();
         let (sender, receiver) = app::channel::<Message>();
@@ -124,10 +138,40 @@ impl Cuby {
         file_browser.set_callback(move |_| {
             // 这里可以发送一个消息来更新信息显示
         });
-        
-        search_browser.set_callback(move |_| {
+          search_browser.set_callback(move |_| {
             // 这里可以发送一个消息来更新信息显示
         });
+        
+        // 初始化静态路径变量
+        BASE_PATH.get_or_init(|| Mutex::new(String::new()));
+        ANIME_PATH.get_or_init(|| Mutex::new(String::new()));
+          // 从命令行参数初始化路径
+        if let Some(ref base_path_str) = cli_args.base_path {
+            if let Some(mutex) = BASE_PATH.get() {
+                if let Ok(mut base_path) = mutex.lock() {
+                    *base_path = base_path_str.clone();
+                    // 加载文件到文件浏览器
+                    load_files_to_file_browser(base_path_str, &mut file_browser);
+                }
+            }
+        }
+        
+        if let Some(ref anime_path_str) = cli_args.anime_path {
+            if let Some(mutex) = ANIME_PATH.get() {
+                if let Ok(mut anime_path) = mutex.lock() {
+                    *anime_path = anime_path_str.clone();
+                }
+            }
+        }
+        
+        // 根据命令行参数更新初始信息显示
+        let initial_message = match (&cli_args.base_path, &cli_args.anime_path) {
+            (Some(base), Some(anime)) => format!("已从命令行加载路径 - Base: {} | Anime: {}", base, anime),
+            (Some(base), None) => format!("已从命令行加载 Base Path: {} - 请选择 Anime Path", base),
+            (None, Some(anime)) => format!("已从命令行加载 Anime Path: {} - 请选择 Base Path", anime),
+            (None, None) => "就绪 - 请选择文件夹".to_string(),
+        };
+        info_frame.set_label(&initial_message);
         
         Self {
             app,
@@ -251,7 +295,10 @@ impl Cuby {
 }
 // main函数
 fn main() {
-    let app = Cuby::new();
+    // 解析命令行参数
+    let cli_args = CliArgs::parse();
+    
+    let app = Cuby::new(&cli_args);
     app.run();
 }
 // 
