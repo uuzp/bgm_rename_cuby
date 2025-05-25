@@ -26,14 +26,14 @@ static ANIME_PATH: OnceLock<Mutex<String>> = OnceLock::new();
 // --- 命令行参数定义 ---
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
-pub struct CliArgs {
+struct CliArgs {
     /// 源文件路径（包含视频文件的文件夹）
     #[arg(short = 'b', long)]
-    pub base_path: Option<String>,
+    base_path: Option<String>,
 
     /// 目标文件路径（重命名后文件存放的文件夹）
     #[arg(short = 'a', long)]
-    pub anime_path: Option<String>,
+    anime_path: Option<String>,
 }
 
 #[derive(Copy, Clone)]
@@ -63,7 +63,7 @@ struct Cuby {
 }
 
 impl Cuby {
-    pub fn new(cli_args: &CliArgs) -> Self {
+    fn new(cli_args: &CliArgs) -> Self {
         // 创建应用和窗口
         let app = app::App::default();
         let (sender, receiver) = app::channel::<Message>();
@@ -92,13 +92,13 @@ impl Cuby {
             }
         });
         
-        let mut btn_b = Button::default().with_label("按钮B");
+        let mut btn_b = Button::default().with_label("|🌀|");
         btn_b.emit(sender, Message::ButtonB);
-          let mut btn_a = Button::default().with_label("按钮A");
+          let mut btn_a = Button::default().with_label("|🎬|");
         btn_a.emit(sender, Message::ButtonA);
         
         let mut search_input = Input::default(); 
-        let mut search_btn = Button::default().with_label("搜索");
+        let mut search_btn = Button::default().with_label("🔍");
         search_btn.emit(sender, Message::Search);
 
         top_flex.fixed(&search_input, 345); 
@@ -107,19 +107,21 @@ impl Cuby {
         top_flex.end();
         main_flex.fixed(&top_flex, 30);
         
-        // 中区域：文件列表和搜索列表，比例3:2
+        // 中区域：文件列表和搜索列表
         let mut mid_flex = Flex::default().row();
         
         let mut file_browser = HoldBrowser::default();
-        file_browser.set_selection_color(enums::Color::from_rgb(255, 255, 180)); // 设置为醒目的浅黄色
+        file_browser.set_selection_color(enums::Color::from_hex_str("#9999FF").unwrap()); 
         
         let mut search_browser = HoldBrowser::default();
-        search_browser.set_selection_color(enums::Color::from_rgb(255, 255, 180)); // 设置为醒目的浅黄色
-          mid_flex.fixed(&search_browser, 400);
-        mid_flex.end();          // 下区域：路径信息Frame和开始按钮
-        let mut bottom_flex = Flex::default().row();        let mut info_frame = Frame::default().with_label("就绪 - 请选择文件夹");
+        search_browser.set_selection_color(enums::Color::from_hex_str("#39C5BB").unwrap()); 
+        mid_flex.fixed(&search_browser, 400);
+        mid_flex.end();          
+        // 下区域：路径信息Frame和开始按钮
+        let mut bottom_flex = Flex::default().row();        
+        let mut info_frame = Frame::default().with_label("@");
         info_frame.set_align(enums::Align::Left | enums::Align::Inside);
-        
+       
         // 创建一个垂直布局来包含按钮和底部边距
         let mut btn_container = Flex::default().column();
         let mut start_btn = Button::default().with_label("开始");
@@ -127,64 +129,44 @@ impl Cuby {
         
         let bottom_margin = Frame::default();
         btn_container.fixed(&bottom_margin, 2);
-        btn_container.end();        // 添加一个空白 Frame 作为右侧边距
+        btn_container.end();
+        
         let right_margin = Frame::default();
         
-        // 固定宽度
+        // 开始按钮布局
         bottom_flex.fixed(&btn_container, 60);
         bottom_flex.fixed(&right_margin, 5);
-        
         bottom_flex.end();
-        main_flex.fixed(&bottom_flex, 30);
         
+        main_flex.fixed(&bottom_flex, 30);
         main_flex.end();
         
         wind.resizable(&main_flex);
         wind.end();
         wind.show();
-          // 设置浏览器的回调函数来处理点击事件
-        file_browser.set_callback(move |_| {
-            // 这里可以发送一个消息来更新信息显示
-        });
-          search_browser.set_callback(move |_| {
-            // 这里可以发送一个消息来更新信息显示
-        });
-        
+           
         // 初始化静态路径变量
         BASE_PATH.get_or_init(|| Mutex::new(String::new()));
-        ANIME_PATH.get_or_init(|| Mutex::new(String::new()));        // 从命令行参数初始化路径
+        ANIME_PATH.get_or_init(|| Mutex::new(String::new()));        
+        
+        // 从命令行参数初始化路径
         if let Some(ref base_path_str) = cli_args.base_path {
-            if let Some(mutex) = BASE_PATH.get() {
-                if let Ok(mut base_path) = mutex.lock() {
-                    *base_path = base_path_str.clone();
-                    // 加载文件到文件浏览器
-                    load_files_to_file_browser(base_path_str, &mut file_browser);
-                      // 从路径中提取番剧名并填充到搜索框
-                    if let Some(folder_name) = std::path::Path::new(base_path_str).file_name().and_then(|n| n.to_str()) {
-                        if let Some(extracted_name) = extract_anime_name_regex(folder_name) {
-                            search_input.set_value(&extracted_name);
-                        }
-                    }
+            set_static_path(&BASE_PATH, base_path_str);
+            // 加载文件到文件浏览器
+            load_files_to_file_browser(base_path_str, &mut file_browser);
+            // 从路径中提取番剧名并填充到搜索框
+            if let Some(folder_name) = std::path::Path::new(base_path_str).file_name().and_then(|n| n.to_str()) {
+                if let Some(extracted_name) = extract_anime_name_regex(folder_name) {
+                    search_input.set_value(&extracted_name);
                 }
             }
         }
         
         if let Some(ref anime_path_str) = cli_args.anime_path {
-            if let Some(mutex) = ANIME_PATH.get() {
-                if let Ok(mut anime_path) = mutex.lock() {
-                    *anime_path = anime_path_str.clone();
-                }
-            }
+            set_static_path(&ANIME_PATH, anime_path_str);
         }
         
-        // 根据命令行参数更新初始信息显示
-        let initial_message = match (&cli_args.base_path, &cli_args.anime_path) {
-            (Some(base), Some(anime)) => format!("已从命令行加载路径 - Base: {} | Anime: {}", base, anime),
-            (Some(base), None) => format!("已从命令行加载 Base Path: {} - 请选择 Anime Path", base),
-            (None, Some(anime)) => format!("已从命令行加载 Anime Path: {} - 请选择 Base Path", anime),
-            (None, None) => "就绪 - 请选择文件夹".to_string(),
-        };
-        info_frame.set_label(&initial_message);        Self {
+        Self {
             app,
             wind,
             file_browser,
@@ -199,50 +181,7 @@ impl Cuby {
         }
     }
 
-    /// 内部鼠标事件处理方法
-    fn handle_mouse_events_internal(&mut self) {
-        let event = app::event();        // 只在相关事件时处理，减少频繁触发
-        if matches!(event, Event::Enter | Event::Push) {
-            if let Some(widget) = app::belowmouse::<HoldBrowser>() {
-                if widget.as_widget_ptr() == self.file_browser.as_widget_ptr() {                    // 鼠标在文件列表，显示base_path
-                    if let Some(mutex) = BASE_PATH.get() {
-                        if let Ok(base_path) = mutex.lock() {
-                            if !base_path.is_empty() {
-                                let display_text = format!("Base Path: {}", base_path);
-                                self.info_frame.set_label(&display_text);
-                            } else {
-                                self.info_frame.set_label("Base Path: 未设置 - 请点击按钮B选择路径");
-                            }
-                        } else {
-                            self.info_frame.set_label("Base Path: 锁定失败");
-                        }
-                    } else {
-                        self.info_frame.set_label("Base Path: 未初始化 - 请点击按钮B选择路径");
-                    }
-                    self.info_frame.redraw();
-                    self.wind.redraw();
-                } else if widget.as_widget_ptr() == self.search_browser.as_widget_ptr() {                    // 鼠标在搜索列表，显示anime_path
-                    if let Some(mutex) = ANIME_PATH.get() {
-                        if let Ok(anime_path) = mutex.lock() {
-                            if !anime_path.is_empty() {
-                                let display_text = format!("Anime Path: {}", anime_path);
-                                self.info_frame.set_label(&display_text);
-                            } else {
-                                self.info_frame.set_label("Anime Path: 未设置 - 请点击按钮A选择路径");
-                            }
-                        } else {
-                            self.info_frame.set_label("Anime Path: 锁定失败");
-                        }
-                    } else {
-                        self.info_frame.set_label("Anime Path: 未初始化 - 请点击按钮A选择路径");
-                    }
-                    self.info_frame.redraw();
-                    self.wind.redraw();}
-            }
-        }
-    }
-
-    pub fn run(mut self) {
+    fn run(mut self) {
         while self.app.wait() {
             if let Some(msg) = self.receiver.recv() {
                 match msg {
@@ -258,72 +197,115 @@ impl Cuby {
                     Message::Exit => {
                         self.wind.hide();
                         break;
-                    },                    Message::ButtonA => {
-                        update_path(&ANIME_PATH,"select anime_path");
-                        if let Some(mutex) = ANIME_PATH.get() {
-                            if let Ok(anime_path) = mutex.lock() {
-                                self.info_frame.set_label(&format!("Anime Path: {}", anime_path));
-                                self.info_frame.redraw();
-                                self.wind.redraw();
-                            }
-                        }
-                    },                    Message::ButtonB => {
-                        update_path(&BASE_PATH,"select base_path");
-                        
-                        if let Some(mutex) = BASE_PATH.get() {
-                            if let Ok(base_path) = mutex.lock() {
-                                self.info_frame.set_label(&format!("Base Path: {}", base_path));
-                                self.info_frame.redraw();
-                                self.wind.redraw();
-                                load_files_to_file_browser(&base_path, &mut self.file_browser);                                // 从路径中提取番剧名并填充到搜索框
-                                if let Some(folder_name) = std::path::Path::new(&*base_path).file_name().and_then(|n| n.to_str()) {
-                                    if let Some(extracted_name) = extract_anime_name_regex(folder_name) {
-                                        self.search_input.set_value(&extracted_name);
-                                    }
-                                }
-                            }
-                        }
-                    },Message::Search => {
-                    let query = self.search_input.value();
-                    if query.is_empty() {
-                        self.search_browser.clear();
-                        *self.search_results.borrow_mut() = None;
-                        self.info_frame.set_label("搜索框为空");
-                    } else {
-                        self.info_frame.set_label(&format!("搜索中: {}", query));
-                        self.handle_search(&query);
+                    },                    
+                    Message::ButtonA => {
+                        self.handle_button_a();
                     }
-                    self.info_frame.redraw();
-                    self.wind.redraw();
-                },                    Message::Start => {
-                        self.handle_start_button();
-                        self.info_frame.redraw();
-                        self.wind.redraw();
+                    Message::ButtonB => {
+                        self.handle_button_b();
                     },
-                }            } else {
+                    Message::Search => {
+                        self.handle_search_button();
+                    },                    
+                    Message::Start => {
+                        self.handle_start_button();
+                        self.file_browser.clear();
+                        self.search_browser.clear();
+                        self.search_results.borrow_mut().take();
+                    },
+                }
+            } else {
                 // 如果没有消息，检查是否有浏览器事件
                 if let Some(widget) = app::belowmouse::<HoldBrowser>() {
                     let event = app::event();
                     
-                    if widget.as_widget_ptr() == self.file_browser.as_widget_ptr() {
-                        if handle_browser_events(&mut self.file_browser, event) {
-                            // 事件已处理，可以根据需要重绘
+                    match (widget.as_widget_ptr() == self.file_browser.as_widget_ptr(), event) {
+                        // 文件浏览器事件
+                        (true, Event::Push) => {
+                            self.handle_browser_click(true); // true 表示文件浏览器
                         }
-                    } else if widget.as_widget_ptr() == self.search_browser.as_widget_ptr() {
-                        // 处理搜索浏览器的双击事件
-                        if event == Event::Push && app::event_clicks() {
+                        (true, drag_event) if handle_browser_events(&mut self.file_browser, drag_event) => {
+                            // 拖拽事件已处理
+                        }
+                        // 搜索浏览器事件
+                        (false, Event::Push) if app::event_clicks() => {
+                            // 双击事件
                             self.handle_search_results_double_click();
                             self.info_frame.redraw();
                             self.wind.redraw();
                         }
+                        (false, Event::Push) => {
+                            // 单击事件
+                            self.handle_browser_click(false); // false 表示搜索浏览器
+                        }
+                        _ => {
+                            // 其他事件不处理
+                        }
                     }
                 }
                 
-                // 检查鼠标事件并更新路径信息显示
-                self.handle_mouse_events_internal();
             }
         }
-    }    /// 处理搜索逻辑并更新UI
+    }
+
+    /// 处理按钮A点击事件
+    fn handle_button_a(&mut self) {
+        update_path(&ANIME_PATH, "select ANIME_PATH");
+        if let Some(mutex) = ANIME_PATH.get() {
+            if let Ok(anime_path) = mutex.lock() {
+                self.info_frame.set_label(&format!("@ {}", anime_path));
+            }
+        }
+    }
+
+    /// 处理按钮B点击事件
+    fn handle_button_b(&mut self) {
+        update_path(&BASE_PATH, "select BASE_PATH");
+        
+        if let Some(mutex) = BASE_PATH.get() {
+            if let Ok(base_path) = mutex.lock() {
+                self.info_frame.set_label(&format!("@ {}", base_path));
+                load_files_to_file_browser(&base_path, &mut self.file_browser);
+                // 从路径中提取番剧名并填充到搜索框
+                if let Some(folder_name) = std::path::Path::new(&*base_path).file_name().and_then(|n| n.to_str()) {
+                    if let Some(extracted_name) = extract_anime_name_regex(folder_name) {
+                        self.search_input.set_value(&extracted_name);
+                    }
+                }
+            }
+        }
+    }
+
+    /// 处理搜索按钮点击事件
+    fn handle_search_button(&mut self) {
+        let query = self.search_input.value();
+        if query.is_empty() {
+            self.info_frame.set_label("无关键词");
+        } else {
+            self.handle_search(&query);
+        }
+    }
+
+    /// 处理浏览器单击事件
+    fn handle_browser_click(&mut self, is_file_browser: bool) {
+        if is_file_browser {
+            // 文件浏览器被点击，显示 BASE_PATH
+            if let Some(mutex) = BASE_PATH.get() {
+                if let Ok(base_path) = mutex.lock() {
+                    self.info_frame.set_label(&format!("@ {}", base_path));
+                }
+            }
+        } else {
+            // 搜索浏览器被点击，显示 ANIME_PATH
+            if let Some(mutex) = ANIME_PATH.get() {
+                if let Ok(anime_path) = mutex.lock() {
+                    self.info_frame.set_label(&format!("@ {}", anime_path));
+                }
+            }
+        }
+    }
+
+    /// 处理搜索逻辑并更新UI
     fn handle_search(&mut self, query: &str) {
         match <Vec<bangumi_api::BangumiSubject> as bangumi_api::ResourceFetcher<&str>>::fetch(query) {
             Ok(subjects) => {
@@ -333,6 +315,8 @@ impl Cuby {
                     self.info_frame.set_label(&format!("未找到与\"{}\"相关的番剧", query));
                 } else {
                     self.search_browser.clear();
+                    self.search_results.borrow_mut().take(); 
+                    self.episode_list.borrow_mut().take();
                     for subject in &subjects {
                         self.search_browser.add(&format!("{} ({})", subject.name_cn, subject.name));
                     }
@@ -355,6 +339,11 @@ impl Cuby {
             return;
         }
 
+        // 检查当前状态：如果已经在显示剧集信息，则不处理双击事件
+        if self.episode_list.borrow().is_some() {
+            return;
+        }
+
         let line = self.search_browser.value();
         if line <= 0 || line > self.search_browser.size() {
             return;
@@ -364,7 +353,8 @@ impl Cuby {
         let subject_id_opt = self.search_results.borrow().as_ref().and_then(|subjects| {
             let idx = (line as usize) - 1;
             subjects.get(idx).map(|subject| subject.id)
-        });        match subject_id_opt {
+        });        
+        match subject_id_opt {
             Some(subject_id) => {
                 match <bangumi_api::EpisodeCollection as bangumi_api::ResourceFetcher<u64>>::fetch(subject_id) {
                     Ok(ep_collection) => {
@@ -407,12 +397,8 @@ impl Cuby {
         }
     }    /// 处理完成按钮逻辑
     fn handle_start_button(&mut self) {
-        // 验证前置条件
-        if self.episode_list.borrow().is_none() {
-            self.info_frame.set_label("错误: 请先搜索并选择番剧");
-            return;
-        }        // 验证路径
-        let (base_path_str, anime_path_str) = match validate_operation_paths() {
+        // 统一验证
+        let (base_path_str, anime_path_str) = match self.is_check() {
             Ok((base, anime)) => (base, anime),
             Err(err) => {
                 self.info_frame.set_label(&err);
@@ -422,19 +408,9 @@ impl Cuby {
 
         // 收集源文件
         let source_files = collect_source_files_from_browser(&self.file_browser);
-        if source_files.is_empty() {
-            self.info_frame.set_label("错误: 源文件夹中没有视频文件");
-            return;
-        }
 
         // 获取剧集数据
-        let ep_collection = match self.episode_list.borrow().as_ref() {
-            Some(ep_data) => ep_data.clone(),
-            None => {
-                self.info_frame.set_label("错误: 剧集数据为空");
-                return;
-            }
-        };
+        let ep_collection = self.episode_list.borrow().as_ref().unwrap().clone();
 
         // 获取番剧名称和年份
         let (anime_display_name, year) = match self.get_selected_anime_details(&ep_collection) {
@@ -452,39 +428,85 @@ impl Cuby {
                 self.info_frame.set_label(&err);
                 return;
             }
-        };        // 执行硬链接
-        let formatted_episode_names = ep_collection.get_formatted_names();
-        let (successful, failed, errors) = self.execute_file_renaming(
-            &source_files,
-            &base_path_str,
-            &formatted_episode_names,
-            &target_anime_dir,
-        );
+        };
 
+        // 执行操作
+        let (successful, failed, errors) = self.execute_file_operations(&source_files, &base_path_str, &ep_collection, &target_anime_dir);
+
+        // 重新加载文件列表并显示结果
+        self.post_operation_cleanup(&base_path_str, successful, failed, &errors);
+    }
+
+    /// 统一验证函数
+    fn is_check(&self) -> Result<(String, String), String> {
+        // 验证剧集信息
+        if self.episode_list.borrow().is_none() {
+            return Err("错误: 请先搜索并选择番剧".to_string());
+        }
+
+        // 验证BASE_PATH
+        let base_path_str = if let Some(mutex) = BASE_PATH.get() {
+            if let Ok(path) = mutex.lock() {
+                if path.is_empty() {
+                    return Err("错误: 未设置源文件路径（B按钮）".to_string());
+                }
+                path.clone()
+            } else {
+                return Err("错误: 无法访问源文件路径".to_string());
+            }
+        } else {
+            return Err("错误: 未初始化源文件路径".to_string());
+        };
+
+        // 验证ANIME_PATH
+        let anime_path_str = if let Some(mutex) = ANIME_PATH.get() {
+            if let Ok(path) = mutex.lock() {
+                if path.is_empty() {
+                    return Err("错误: 未设置目标位置路径（A按钮）".to_string());
+                }
+                path.clone()
+            } else {
+                return Err("错误: 无法访问目标位置路径".to_string());
+            }
+        } else {
+            return Err("错误: 未初始化目标位置路径".to_string());
+        };
+
+        Ok((base_path_str, anime_path_str))
+    }
+
+    /// 执行文件操作
+    fn execute_file_operations(
+        &self,
+        source_files: &[String],
+        base_path_str: &str,
+        ep_collection: &bangumi_api::EpisodeCollection,
+        target_anime_dir: &std::path::Path,
+    ) -> (usize, usize, Vec<String>) {
+        let formatted_episode_names = ep_collection.get_formatted_names();
+        self.execute_file_renaming(source_files, base_path_str, &formatted_episode_names, target_anime_dir)
+    }
+
+    /// 操作后清理和结果显示
+    fn post_operation_cleanup(&mut self, base_path_str: &str, successful: usize, failed: usize, errors: &[String]) {
         // 重新加载文件列表
-        load_files_to_file_browser(&base_path_str, &mut self.file_browser);
-          // 显示结果
-        self.display_rename_summary(successful, failed, &errors);
-        
+        load_files_to_file_browser(base_path_str, &mut self.file_browser);
+
         // 统计字幕文件处理情况
         let subtitle_success = errors.iter().filter(|msg| msg.contains("字幕文件复制成功")).count();
         let subtitle_failed = errors.iter().filter(|msg| msg.contains("字幕文件复制失败")).count();
-          // 更新状态信息
-        if failed == 0 && subtitle_failed == 0 {
-            if subtitle_success > 0 {
-                self.info_frame.set_label(&format!("操作完成: {} 个视频文件硬链接成功, {} 个字幕文件复制成功", successful, subtitle_success));
-            } else {
-                self.info_frame.set_label(&format!("硬链接完成: {} 个文件成功", successful));
-            }
+
+        // 简单显示结果统计
+        if subtitle_success > 0 || subtitle_failed > 0 {
+            self.info_frame.set_label(&format!("完成: 视频 {}成功 {}失败, 字幕 {}成功 {}失败", 
+                                              successful, failed, subtitle_success, subtitle_failed));
         } else {
-            if subtitle_success > 0 || subtitle_failed > 0 {
-                self.info_frame.set_label(&format!("操作完成: 视频 {} 成功 {} 失败, 字幕 {} 成功 {} 失败", 
-                                                  successful, failed, subtitle_success, subtitle_failed));
-            } else {
-                self.info_frame.set_label(&format!("硬链接完成: {} 成功, {} 失败", successful, failed));
-            }
+            self.info_frame.set_label(&format!("完成: 视频 {}成功 {}失败", successful, failed));
         }
-    }    /// 获取选定的番剧名称和年份
+        self.search_input.set_value(""); // 清空搜索框
+    }
+
+    /// 获取选定的番剧名称和年份
     fn get_selected_anime_details(&self, ep_collection: &bangumi_api::EpisodeCollection) -> Result<(String, String), String> {
         let year = ep_collection.year.to_string();
 
@@ -622,28 +644,7 @@ impl Cuby {
             }
         }
         (successful_links, failed_links, errors_log)
-    }    /// 显示硬链接操作总结
-    fn display_rename_summary(&self, successful_links: usize, failed_links: usize, errors_log: &[String]) {
-        let mut summary_message = format!("操作完成报告:\n视频文件硬链接 - 成功: {}, 失败: {}", successful_links, failed_links);
-        
-        // 统计字幕文件的处理情况
-        let subtitle_success = errors_log.iter().filter(|msg| msg.contains("字幕文件复制成功")).count();
-        let subtitle_failed = errors_log.iter().filter(|msg| msg.contains("字幕文件复制失败")).count();
-        let subtitle_skipped = errors_log.iter().filter(|msg| msg.contains("跳过字幕文件")).count();
-        
-        if subtitle_success > 0 || subtitle_failed > 0 || subtitle_skipped > 0 {
-            summary_message.push_str(&format!("\n字幕文件复制 - 成功: {}, 失败: {}, 跳过: {}", 
-                                             subtitle_success, subtitle_failed, subtitle_skipped));
-        }
-        
-        if !errors_log.is_empty() {
-            summary_message.push_str("\n\n详细信息:\n");
-            summary_message.push_str(&errors_log.join("\n"));
-        }
-        dialog::message_default(&summary_message);
     }
-
-    // ...existing code...
 }
 // main函数
 fn main() {
@@ -733,7 +734,6 @@ pub fn find_matching_subtitle_files(video_file_name: &str, base_path: &str) -> V
 
 /// 替换文件名中的特殊字符
 // 直接编码成URL格式
-// URL.encode() 是一个示例函数，实际实现需要根据具体需求来
 use urlencoding;
 
 /// 替换文件名中的特殊字符
@@ -1078,34 +1078,11 @@ fn extract_from_simple_format(dir_name: &str) -> Option<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-      #[test]
-    fn test_find_matching_subtitle_files() {
-        // 测试基本匹配功能
-        // 由于我们无法在测试中创建真实文件，这里只是验证函数不会崩溃
-        let result = find_matching_subtitle_files("test.mkv", ".");
-        // 函数应该返回一个空的Vec，因为当前目录可能没有匹配的字幕文件
-        assert!(result.is_empty() || !result.is_empty()); // 基本的非崩溃测试
-    }
-    
-    #[test]
-    fn test_find_matching_subtitle_files_with_real_data() {
-        // 测试使用workspace中的实际数据
-        let test_path = r"a:\Dev\PJ\bgm_rename_cuby\data\b\[冷番补完字幕组][魔法公主明琪桃子][魔法のプリンセス ミンキーモモ][Mahou no Princess Minky Momo][1982-1987][S01+Movie+SP][1080p][内封简繁中字]";
-        let video_file = "魔法公主明琪桃子.Mahou.no.Princess.Minky.Momo.1982.S01E01.1080p.BDRip.x265.FLAC-CoolFansSub.mkv";
-        
-        // 检查目录是否存在
-        if std::path::Path::new(test_path).exists() {
-            let result = find_matching_subtitle_files(video_file, test_path);
-            // 应该找到匹配的srt字幕文件
-            if !result.is_empty() {
-                println!("找到字幕文件: {:?}", result);
-                // 检查是否包含srt文件
-                assert!(result.iter().any(|(_, ext)| ext == "srt"));
-            }
+/// 设置静态路径变量的通用函数
+fn set_static_path(lock: &OnceLock<Mutex<String>>, path_str: &str) {
+    if let Some(mutex) = lock.get() {
+        if let Ok(mut path) = mutex.lock() {
+            *path = path_str.to_string();
         }
     }
 }
