@@ -733,15 +733,6 @@ pub fn find_matching_subtitle_files(video_file_name: &str, base_path: &str) -> V
     subtitle_files
 }
 
-/// 替换文件名中的特殊字符
-// 直接编码成URL格式
-use urlencoding;
-
-/// 替换文件名中的特殊字符
-pub fn replace_special_characters(file_name: &str) -> String {
-    urlencoding::encode(file_name).to_string()
-}
-
 // 需要添加 regex 依赖: 
 use regex::Regex;
 
@@ -978,37 +969,6 @@ pub fn handle_browser_events(browser: &mut HoldBrowser, event: Event) -> bool {
 fn handle_about_menu() {
     let repo_url = "https://github.com/uuzp/bgm_rename_cuby";
     let _ = webbrowser::open(repo_url);
-}
-
-/// 验证操作路径
-pub fn validate_operation_paths() -> Result<(String, String), String> {
-    let base_path_str = if let Some(mutex) = BASE_PATH.get() {
-        if let Ok(path) = mutex.lock() {
-            if path.is_empty() {
-                return Err("错误: 未设置源文件路径（B按钮）".to_string());
-            }
-            path.clone()
-        } else {
-            return Err("错误: 无法访问源文件路径".to_string());
-        }
-    } else {
-        return Err("错误: 未初始化源文件路径".to_string());
-    };
-
-    let anime_path_str = if let Some(mutex) = ANIME_PATH.get() {
-        if let Ok(path) = mutex.lock() {
-            if path.is_empty() {
-                return Err("错误: 未设置目标位置路径（A按钮）".to_string());
-            }
-            path.clone()
-        } else {
-            return Err("错误: 无法访问目标位置路径".to_string());
-        }
-    } else {
-        return Err("错误: 未初始化目标位置路径".to_string());
-    };
-
-    Ok((base_path_str, anime_path_str))
 }
 
 /// 清理文件名中的特殊字符，使用全角字符替换
