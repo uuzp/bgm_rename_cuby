@@ -207,12 +207,8 @@ impl Cuby {
                     },
                     Message::Search => {
                         self.handle_search_button();
-                    },                    
-                    Message::Start => {
+                    },                      Message::Start => {
                         self.handle_start_button();
-                        self.file_browser.clear();
-                        self.search_browser.clear();
-                        self.search_results.borrow_mut().take();
                     },
                 }
             } else {
@@ -400,8 +396,17 @@ impl Cuby {
     fn handle_start_button(&mut self) {
         let result = self.execute_operation();
         match result {
-            Ok(message) => self.info_frame.set_label(&message),
-            Err(error) => self.info_frame.set_label(&error),
+            Ok(message) => {
+                self.info_frame.set_label(&message);
+                // 只有操作成功时才清空列表
+                self.file_browser.clear();
+                self.search_browser.clear();
+                self.search_results.borrow_mut().take();
+            },
+            Err(error) => {
+                // 操作失败时，不清空列表，只显示错误信息
+                self.info_frame.set_label(&error);
+            },
         }
     }
 
@@ -420,9 +425,7 @@ impl Cuby {
         let (anime_display_name, year) = self.get_selected_anime_details(&ep_collection)?;
 
         // 创建目标目录
-        let target_anime_dir = self.prepare_target_directory(&anime_path_str, &anime_display_name, &year)?;
-
-        // 执行操作
+        let target_anime_dir = self.prepare_target_directory(&anime_path_str, &anime_display_name, &year)?;        // 执行操作
         let (successful, failed, _errors) = self.execute_file_operations(&source_files, &base_path_str, &ep_collection, &target_anime_dir);
 
         // 重新加载文件列表并清空搜索框
