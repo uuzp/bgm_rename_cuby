@@ -396,16 +396,19 @@ impl Cuby {
                 self.info_frame.set_label("选择无效");
             }
         }
-    }    /// 处理完成按钮逻辑
+    }    /// 处理完成按钮逻辑（简化版）
     fn handle_start_button(&mut self) {
+        let result = self.execute_operation();
+        match result {
+            Ok(message) => self.info_frame.set_label(&message),
+            Err(error) => self.info_frame.set_label(&error),
+        }
+    }
+
+    /// 执行完整操作流程
+    fn execute_operation(&mut self) -> Result<String, String> {
         // 统一验证
-        let (base_path_str, anime_path_str) = match self.is_check() {
-            Ok((base, anime)) => (base, anime),
-            Err(err) => {
-                self.info_frame.set_label(&err);
-                return;
-            }
-        };
+        let (base_path_str, anime_path_str) = self.is_check()?;
 
         // 收集源文件
         let source_files = collect_source_files_from_browser(&self.file_browser);
@@ -414,28 +417,19 @@ impl Cuby {
         let ep_collection = self.episode_list.borrow().as_ref().unwrap().clone();
 
         // 获取番剧名称和年份
-        let (anime_display_name, year) = match self.get_selected_anime_details(&ep_collection) {
-            Ok((name, year)) => (name, year),
-            Err(err) => {
-                self.info_frame.set_label(&err);
-                return;
-            }
-        };
+        let (anime_display_name, year) = self.get_selected_anime_details(&ep_collection)?;
 
         // 创建目标目录
-        let target_anime_dir = match self.prepare_target_directory(&anime_path_str, &anime_display_name, &year) {
-            Ok(dir) => dir,
-            Err(err) => {
-                self.info_frame.set_label(&err);
-                return;
-            }
-        };
+        let target_anime_dir = self.prepare_target_directory(&anime_path_str, &anime_display_name, &year)?;
 
         // 执行操作
-        let (successful, failed, errors) = self.execute_file_operations(&source_files, &base_path_str, &ep_collection, &target_anime_dir);
+        let (successful, failed, _errors) = self.execute_file_operations(&source_files, &base_path_str, &ep_collection, &target_anime_dir);
 
-        // 重新加载文件列表并显示结果
-        self.post_operation_cleanup(&base_path_str, successful, failed, &errors);
+        // 重新加载文件列表并清空搜索框
+        load_files_to_file_browser(&base_path_str, &mut self.file_browser);
+        self.search_input.set_value("");
+
+        Ok(format!("完成: {}成功 {}失败", successful, failed))
     }
 
     /// 统一验证函数
@@ -486,28 +480,7 @@ impl Cuby {
     ) -> (usize, usize, Vec<String>) {
         let formatted_episode_names = episodes.formatted_names();
         self.execute_file_renaming(source_files, base_path_str, &formatted_episode_names, target_anime_dir)
-    }
-
-    /// 操作后清理和结果显示
-    fn post_operation_cleanup(&mut self, base_path_str: &str, successful: usize, failed: usize, errors: &[String]) {
-        // 重新加载文件列表
-        load_files_to_file_browser(base_path_str, &mut self.file_browser);
-
-        // 统计字幕文件处理情况
-        let subtitle_success = errors.iter().filter(|msg| msg.contains("字幕文件复制成功")).count();
-        let subtitle_failed = errors.iter().filter(|msg| msg.contains("字幕文件复制失败")).count();
-
-        // 简单显示结果统计
-        if subtitle_success > 0 || subtitle_failed > 0 {
-            self.info_frame.set_label(&format!("完成: 视频 {}成功 {}失败, 字幕 {}成功 {}失败", 
-                                              successful, failed, subtitle_success, subtitle_failed));
-        } else {
-            self.info_frame.set_label(&format!("完成: 视频 {}成功 {}失败", successful, failed));
-        }
-        self.search_input.set_value(""); // 清空搜索框
-    }
-
-    /// 获取选定的番剧名称和年份
+    }    /// 获取选定的番剧名称和年份
     fn get_selected_anime_details(&self, episodes: &bangumi_api::Episodes) -> Result<(String, String), String> {
         let year = episodes.year.to_string();
 
