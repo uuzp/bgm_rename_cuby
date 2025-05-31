@@ -57,8 +57,9 @@ struct Cuby {
     info_frame: Frame,
     receiver: app::Receiver<Message>,
     // 搜索相关的数据存储
-    search_results: Rc<RefCell<Option<Vec<bangumi_api::BangumiSubject>>>>,
-    episode_list: Rc<RefCell<Option<bangumi_api::EpisodeCollection>>>,
+    search_results: Rc<RefCell<Option<Vec<bangumi_api::Subject>>>>,
+    episode_list: Rc<RefCell<Option<bangumi_api::Episodes>>>,
+
     selected_anime_id: Rc<RefCell<Option<String>>>,
 }
 
@@ -307,7 +308,7 @@ impl Cuby {
 
     /// 处理搜索逻辑并更新UI
     fn handle_search(&mut self, query: &str) {
-        match <Vec<bangumi_api::BangumiSubject> as bangumi_api::ResourceFetcher<&str>>::fetch(query) {
+        match bangumi_api::get::<Vec<bangumi_api::Subject>, &str>(query) {
             Ok(subjects) => {
                 if subjects.is_empty() {
                     self.search_browser.clear();
@@ -356,14 +357,14 @@ impl Cuby {
         });        
         match subject_id_opt {
             Some(subject_id) => {
-                match <bangumi_api::EpisodeCollection as bangumi_api::ResourceFetcher<u64>>::fetch(subject_id) {
-                    Ok(ep_collection) => {
-                        *self.episode_list.borrow_mut() = Some(ep_collection.clone());
+                match bangumi_api::get::<bangumi_api::Episodes, u64>(subject_id) {
+                    Ok(episodes) => {
+                        *self.episode_list.borrow_mut() = Some(episodes.clone());
                         *self.selected_anime_id.borrow_mut() = Some(subject_id.to_string());
                         
                         self.search_browser.clear();
-                        if !ep_collection.episodes.is_empty() {
-                            for ep in &ep_collection.episodes {
+                        if !episodes.items.is_empty() {
+                            for ep in &episodes.items {
                                 let name = if !ep.name_cn.is_empty() {
                                     ep.name_cn.clone()
                                 } else {
@@ -372,7 +373,7 @@ impl Cuby {
                                 let display_text = format!("Ep.{:02} - {}", ep.sort, name);
                                 self.search_browser.add(&display_text);
                             }
-                            self.info_frame.set_label(&format!("已加载 {} 集剧集信息", ep_collection.episodes.len()));
+                            self.info_frame.set_label(&format!("已加载 {} 集剧集信息", episodes.items.len()));
                         } else {
                             self.search_browser.add("未能获取到剧集信息或剧集列表为空");
                             self.info_frame.set_label("剧集列表为空");
@@ -480,10 +481,10 @@ impl Cuby {
         &self,
         source_files: &[String],
         base_path_str: &str,
-        ep_collection: &bangumi_api::EpisodeCollection,
+        episodes: &bangumi_api::Episodes,
         target_anime_dir: &std::path::Path,
     ) -> (usize, usize, Vec<String>) {
-        let formatted_episode_names = ep_collection.get_formatted_names();
+        let formatted_episode_names = episodes.formatted_names();
         self.execute_file_renaming(source_files, base_path_str, &formatted_episode_names, target_anime_dir)
     }
 
@@ -507,8 +508,8 @@ impl Cuby {
     }
 
     /// 获取选定的番剧名称和年份
-    fn get_selected_anime_details(&self, ep_collection: &bangumi_api::EpisodeCollection) -> Result<(String, String), String> {
-        let year = ep_collection.year.to_string();
+    fn get_selected_anime_details(&self, episodes: &bangumi_api::Episodes) -> Result<(String, String), String> {
+        let year = episodes.year.to_string();
 
         // 检查是否有选中的番剧ID
         let selected_anime_id_opt = self.selected_anime_id.borrow();
