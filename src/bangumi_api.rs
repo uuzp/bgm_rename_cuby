@@ -253,7 +253,7 @@ impl Fetcher<&str> for Vec<Subject> {
         
         let encoded_keywords = urlencoding::encode(keywords.trim());
         let url = format!(
-            "{}/search/subject/{}?type=2&responseGroup=small&limit=25",
+            "{}/search/subject/{}?type=2&responseGroup=large&limit=25",
             BGM_API_BASE,
             encoded_keywords
         );
