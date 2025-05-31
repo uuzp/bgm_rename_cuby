@@ -985,46 +985,6 @@ pub fn clean_filename(s: &str) -> String {
      .replace("|", "｜")
 }
 
-/// 从带标签的格式提取番剧名，例如 [组名][状态]番剧名
-fn extract_from_tagged_format(dir_name: &str) -> Option<String> {
-    if !dir_name.starts_with('[') {
-        return None;
-    }
-    
-    // 确定要提取的部分索引
-    let cont = if dir_name.len() >= 5 && 
-               (dir_name[1..4].eq_ignore_ascii_case("rev") || 
-                dir_name[1..4].eq_ignore_ascii_case("raw")) && 
-               dir_name.chars().nth(4) == Some(']') {
-        3 // 对应 [rev][组名]番剧名 或 [raw][组名]番剧名 格式
-    } else {
-        2 // 对应 [组名][状态]番剧名 格式
-    };
-
-    // 分割字符串并提取相应部分
-    let parts: Vec<String> = dir_name
-        .replace(']', "[") // 统一分隔符
-        .split('[')
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.trim().to_string())
-        .collect();
-
-    // 确保有足够的部分且索引有效
-    if parts.len() >= cont {
-        Some(parts[cont - 1].clone())
-    } else {
-        None
-    }
-}
-
-/// 从简单格式提取番剧名，例如 番剧名_其他信息
-fn extract_from_simple_format(dir_name: &str) -> Option<String> {
-    dir_name
-        .split('_')
-        .next()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
 /// 设置静态路径变量的通用函数
 fn set_static_path(lock: &OnceLock<Mutex<String>>, path_str: &str) {
     if let Some(mutex) = lock.get() {
