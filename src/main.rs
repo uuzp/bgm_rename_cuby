@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 use fltk::dialog;
 use fltk::enums::Event;
 use fltk::{
@@ -7,6 +8,7 @@ use fltk::{
     enums,
     frame::Frame,
     group::Flex,
+    image,
     input::Input,
     menu::MenuButton,
     prelude::*,
@@ -141,10 +143,14 @@ impl Cuby {
         
         main_flex.fixed(&bottom_flex, 30);
         main_flex.end();
-        
-        wind.resizable(&main_flex);
+          wind.resizable(&main_flex);
         wind.end();
         wind.show();
+        
+        // 设置窗口图标
+        if let Ok(icon) = image::PngImage::load("images/ice-cubes.png") {
+            wind.set_icon(Some(icon));
+        }
            
         // 初始化静态路径变量
         BASE_PATH.get_or_init(|| Mutex::new(String::new()));
@@ -739,9 +745,8 @@ pub fn extract_anime_name_regex(file_name: &str) -> Option<String> {
             return caps.get(1).or_else(|| caps.get(2))
                 .map(|m| m.as_str().trim().to_string());
         }
-        
-        // 处理 [组名]番剧名[其他] 格式
-        let re2 = Regex::new(r"^\[[^\]]+\]\s*([^[]+)").unwrap();
+          // 处理 [组名]番剧名[其他] 格式
+        let re2 = Regex::new(r"^\[[^\]]+\]\s*([^\[]+)").unwrap();
         if let Some(caps) = re2.captures(file_name) {
             return caps.get(1).map(|m| m.as_str().trim().to_string());
         }

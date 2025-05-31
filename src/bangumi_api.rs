@@ -1,8 +1,6 @@
 // src/bangumi_api.rs
 
 use miniserde::Deserialize;
-use minreq;
-use urlencoding;
 use std::time::Duration;
 
 // 配置常量
