@@ -7,7 +7,6 @@ use std::time::Duration;
 
 // --- 配置常量 ---
 const BGM_API_BASE: &str = "https://api.bgm.tv";
-const BGM_API_V0_BASE: &str = "https://api.bgm.tv/v0";
 const DEFAULT_USER_AGENT: &str = "uuzp/bgm_rename_cuby";
 const MAX_RETRIES: u32 = 3;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -272,8 +271,8 @@ impl Fetcher<u64> for Episodes {
         }
         
         let url = format!(
-            "{}/episodes?subject_id={}&type=0&limit=100&offset=0",
-            BGM_API_V0_BASE,
+            "{}/v0/episodes?subject_id={}&type=0&limit=100&offset=0",
+            BGM_API_BASE,
             subject_id
         );
         
