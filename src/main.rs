@@ -143,12 +143,13 @@ impl Cuby {
         
         main_flex.fixed(&bottom_flex, 30);
         main_flex.end();
-          wind.resizable(&main_flex);
-        wind.end();
+        wind.resizable(&main_flex);
+        wind.end();        
         wind.show();
         
-        // 设置窗口图标
-        if let Ok(icon) = image::PngImage::load("images/ice-cubes.png") {
+        // 设置窗口图标 - 使用嵌入的图标数据
+        let icon_data = include_bytes!("../images/ice-cubes.png");
+        if let Ok(icon) = image::PngImage::from_data(icon_data) {
             wind.set_icon(Some(icon));
         }
            
