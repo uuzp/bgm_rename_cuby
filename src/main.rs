@@ -985,20 +985,6 @@ pub fn clean_filename(s: &str) -> String {
      .replace("|", "｜")
 }
 
-/// 从路径中提取番剧名的函数
-pub fn extract_anime_name_from_path(path_str: &str) -> Option<String> {
-    let path = std::path::Path::new(path_str);
-    let dir_name = path.file_name()?.to_str()?;
-
-    // 优先尝试从带标签的格式提取
-    if let Some(name) = extract_from_tagged_format(dir_name) {
-        return Some(name);
-    }
-
-    // 回退到简单格式
-    extract_from_simple_format(dir_name)
-}
-
 /// 从带标签的格式提取番剧名，例如 [组名][状态]番剧名
 fn extract_from_tagged_format(dir_name: &str) -> Option<String> {
     if !dir_name.starts_with('[') {
