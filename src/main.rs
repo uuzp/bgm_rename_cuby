@@ -540,7 +540,7 @@ impl Cuby {
         }
     }/// 准备目标目录
     fn prepare_target_directory(&self, anime_path_root_str: &str, anime_display_name: &str, year: &str) -> Result<std::path::PathBuf, String> {
-        let cleaned_anime_name_for_folder = replace_invalid_chars(anime_display_name);
+        let cleaned_anime_name_for_folder = clean_filename(anime_display_name);
         let target_anime_folder_name = format!("{}({})", cleaned_anime_name_for_folder, year);
         let target_anime_dir = std::path::Path::new(anime_path_root_str).join(target_anime_folder_name);
 
@@ -579,7 +579,7 @@ impl Cuby {
 
             let source_file_path = std::path::Path::new(base_path_str).join(source_file_name_str);
             let original_extension = source_file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-              let cleaned_episode_name_part = replace_invalid_chars(&formatted_episode_names[i]);
+              let cleaned_episode_name_part = clean_filename(&formatted_episode_names[i]);
             let new_file_name_str = if original_extension.is_empty() {
                 cleaned_episode_name_part.clone()
             } else {
@@ -1011,8 +1011,8 @@ pub fn validate_operation_paths() -> Result<(String, String), String> {
     Ok((base_path_str, anime_path_str))
 }
 
-/// 替换文件名中的特殊字符
-pub fn replace_invalid_chars(s: &str) -> String {
+/// 清理文件名中的特殊字符，使用全角字符替换
+pub fn clean_filename(s: &str) -> String {
     s.replace("/", "／")
      .replace("\\", "＼") // Note: in a regular string, this would be a single backslash.
      .replace("<", "＜")
