@@ -300,11 +300,9 @@ impl Cuby {
                 }
             }
         }
-    }
-
-    /// 处理搜索逻辑并更新UI
+    }    /// 处理搜索逻辑并更新UI
     fn handle_search(&mut self, query: &str) {
-        match bangumi_api::get::<Vec<bangumi_api::Subject>, &str>(query) {
+        match bangumi_api::search_subjects(query) {
             Ok(subjects) => {
                 if subjects.is_empty() {
                     self.search_browser.clear();
@@ -349,38 +347,52 @@ impl Cuby {
         // 从搜索结果中获取选定番剧的ID
         let subject_id_opt = self.search_results.borrow().as_ref().and_then(|subjects| {
             let idx = (line as usize) - 1;
-            subjects.get(idx).map(|subject| subject.id)
-        });        
+            subjects.get(idx).map(|subject| subject.id)        });        
         match subject_id_opt {
             Some(subject_id) => {
-                match bangumi_api::get::<bangumi_api::Episodes, u64>(subject_id) {
-                    Ok(episodes) => {
-                        *self.episode_list.borrow_mut() = Some(episodes.clone());
-                        *self.selected_anime_id.borrow_mut() = Some(subject_id.to_string());
-                        
-                        self.search_browser.clear();
-                        if !episodes.items.is_empty() {
-                            for ep in &episodes.items {
-                                let name = if !ep.name_cn.is_empty() {
-                                    ep.name_cn.clone()
+                // 从搜索结果中获取对应的Subject
+                let selected_subject_opt = self.search_results.borrow().as_ref().and_then(|subjects| {
+                    subjects.iter().find(|subject| subject.id == subject_id).cloned()
+                });
+                
+                match selected_subject_opt {
+                    Some(selected_subject) => {
+                        match bangumi_api::get_episodes(&selected_subject) {
+                            Ok(episodes) => {
+                                *self.episode_list.borrow_mut() = Some(episodes.clone());
+                                *self.selected_anime_id.borrow_mut() = Some(subject_id.to_string());
+                                
+                                self.search_browser.clear();
+                                if !episodes.items.is_empty() {
+                                    for ep in &episodes.items {
+                                        let name = if !ep.name_cn.is_empty() {
+                                            ep.name_cn.clone()
+                                        } else {
+                                            ep.name.clone()
+                                        };
+                                        let display_text = format!("Ep.{:02} - {}", ep.sort, name);
+                                        self.search_browser.add(&display_text);
+                                    }
+                                    self.info_frame.set_label(&format!("已加载 {} 集剧集信息", episodes.items.len()));
                                 } else {
-                                    ep.name.clone()
-                                };
-                                let display_text = format!("Ep.{:02} - {}", ep.sort, name);
-                                self.search_browser.add(&display_text);
+                                    self.search_browser.add("未能获取到剧集信息或剧集列表为空");
+                                    self.info_frame.set_label("剧集列表为空");
+                                }
                             }
-                            self.info_frame.set_label(&format!("已加载 {} 集剧集信息", episodes.items.len()));
-                        } else {
-                            self.search_browser.add("未能获取到剧集信息或剧集列表为空");
-                            self.info_frame.set_label("剧集列表为空");
-                        }
-                    }
-                    Err(err_msg) => {
+                            Err(err_msg) => {
+                                self.search_browser.clear();
+                                self.search_browser.add(&format!("获取剧集列表失败: {}", err_msg));
+                                *self.episode_list.borrow_mut() = None;
+                                *self.selected_anime_id.borrow_mut() = None;
+                                self.info_frame.set_label("获取剧集信息失败");
+                            }
+                        }                    }
+                    None => {
                         self.search_browser.clear();
-                        self.search_browser.add(&format!("获取剧集列表失败: {}", err_msg));
+                        self.search_browser.add("未找到对应的番剧信息");
                         *self.episode_list.borrow_mut() = None;
                         *self.selected_anime_id.borrow_mut() = None;
-                        self.info_frame.set_label("获取剧集信息失败");
+                        self.info_frame.set_label("数据不一致");
                     }
                 }
             }
@@ -392,7 +404,9 @@ impl Cuby {
                 self.info_frame.set_label("选择无效");
             }
         }
-    }    /// 处理完成按钮逻辑（简化版）
+    }
+
+    /// 处理完成按钮逻辑（简化版）
     fn handle_start_button(&mut self) {
         let result = self.execute_operation();
         match result {
