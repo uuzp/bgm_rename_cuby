@@ -1,6 +1,9 @@
 // src/bangumi_api.rs
 
 use miniserde::Deserialize;
+use native_tls::TlsConnector;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::time::Duration;
 
 // 配置常量
@@ -119,24 +122,233 @@ struct EpisodeResponse {
 
 // 简化的网络请求函数
 fn fetch_json<T: Deserialize>(url: &str) -> Result<T, BangumiError> {
-    let response = minreq::get(url)
-        .with_timeout(REQUEST_TIMEOUT.as_secs())
-        .with_header("User-Agent", DEFAULT_USER_AGENT)
-        .send()
-        .map_err(|e| BangumiError::Network(format!("网络请求失败: {}", e)))?;
-    
-    // 检查HTTP状态码
-    match response.status_code {
-        200 => {},
-        404 => return Err(BangumiError::NotFound),
-        429 => return Err(BangumiError::RateLimit),
-        code => return Err(BangumiError::Network(format!("HTTP错误: {}", code))),
-    }
-      let response_text = response.as_str()
-        .map_err(|e| BangumiError::Parse(format!("响应文本编码错误: {}", e)))?;
-    
-    miniserde::json::from_str(response_text)
+    let response_text = https_get_text(url, DEFAULT_USER_AGENT, REQUEST_TIMEOUT, 5)?;
+    miniserde::json::from_str(&response_text)
         .map_err(|e| BangumiError::Parse(format!("JSON解析失败: {}", e)))
+}
+
+fn https_get_text(
+    url: &str,
+    user_agent: &str,
+    timeout: Duration,
+    max_redirects: usize,
+) -> Result<String, BangumiError> {
+    let mut current = url.to_string();
+    for _ in 0..=max_redirects {
+        let (host, port, path_and_query) = parse_https_url(&current)?;
+        let bytes = https_get_bytes(&host, port, &path_and_query, user_agent, timeout)?;
+        let response = parse_http_response(&bytes)?;
+
+        match response.status_code {
+            200 => {
+                return String::from_utf8(response.body)
+                    .map_err(|e| BangumiError::Parse(format!("响应文本编码错误: {}", e)));
+            }
+            301 | 302 | 303 | 307 | 308 => {
+                let Some(location) = response.header("location") else {
+                    return Err(BangumiError::Network("HTTP重定向但缺少Location头".to_string()));
+                };
+                current = resolve_redirect_url(&current, location);
+                continue;
+            }
+            404 => return Err(BangumiError::NotFound),
+            429 => return Err(BangumiError::RateLimit),
+            code => return Err(BangumiError::Network(format!("HTTP错误: {}", code))),
+        }
+    }
+
+    Err(BangumiError::Network("重定向次数过多".to_string()))
+}
+
+fn parse_https_url(url: &str) -> Result<(String, u16, String), BangumiError> {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return Err(BangumiError::InvalidInput("仅支持 https:// URL".to_string()));
+    };
+
+    let (host_port, path_part) = match rest.split_once('/') {
+        Some((h, p)) => (h, format!("/{}", p)),
+        None => (rest, "/".to_string()),
+    };
+
+    let (host, port) = match host_port.split_once(':') {
+        Some((h, p)) => {
+            let port: u16 = p
+                .parse()
+                .map_err(|_| BangumiError::InvalidInput("URL端口非法".to_string()))?;
+            (h.to_string(), port)
+        }
+        None => (host_port.to_string(), 443u16),
+    };
+
+    if host.is_empty() {
+        return Err(BangumiError::InvalidInput("URL主机为空".to_string()));
+    }
+
+    Ok((host, port, path_part))
+}
+
+fn https_get_bytes(
+    host: &str,
+    port: u16,
+    path_and_query: &str,
+    user_agent: &str,
+    timeout: Duration,
+) -> Result<Vec<u8>, BangumiError> {
+    let addr = (host, port);
+    let stream = TcpStream::connect(addr)
+        .map_err(|e| BangumiError::Network(format!("连接失败: {}", e)))?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| BangumiError::Network(format!("设置读取超时失败: {}", e)))?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| BangumiError::Network(format!("设置写入超时失败: {}", e)))?;
+
+    let connector = TlsConnector::new()
+        .map_err(|e| BangumiError::Network(format!("TLS初始化失败: {}", e)))?;
+    let mut tls = connector
+        .connect(host, stream)
+        .map_err(|e| BangumiError::Network(format!("TLS握手失败: {}", e)))?;
+
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {ua}\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
+        path = path_and_query,
+        host = host,
+        ua = user_agent
+    );
+    tls.write_all(request.as_bytes())
+        .map_err(|e| BangumiError::Network(format!("写入请求失败: {}", e)))?;
+
+    let mut buf = Vec::new();
+    tls.read_to_end(&mut buf)
+        .map_err(|e| BangumiError::Network(format!("读取响应失败: {}", e)))?;
+    Ok(buf)
+}
+
+struct HttpResponse {
+    status_code: u16,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+impl HttpResponse {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+fn parse_http_response(bytes: &[u8]) -> Result<HttpResponse, BangumiError> {
+    let header_end = bytes
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or_else(|| BangumiError::Parse("HTTP响应头不完整".to_string()))?;
+    let (header_bytes, body_bytes) = bytes.split_at(header_end + 4);
+
+    let header_text = std::str::from_utf8(header_bytes)
+        .map_err(|e| BangumiError::Parse(format!("HTTP头编码错误: {}", e)))?;
+    let mut lines = header_text.split("\r\n");
+    let status_line = lines
+        .next()
+        .ok_or_else(|| BangumiError::Parse("HTTP状态行缺失".to_string()))?;
+    let mut status_parts = status_line.split_whitespace();
+    let _http_version = status_parts
+        .next()
+        .ok_or_else(|| BangumiError::Parse("HTTP版本缺失".to_string()))?;
+    let code_str = status_parts
+        .next()
+        .ok_or_else(|| BangumiError::Parse("HTTP状态码缺失".to_string()))?;
+    let status_code: u16 = code_str
+        .parse()
+        .map_err(|_| BangumiError::Parse("HTTP状态码非法".to_string()))?;
+
+    let mut headers = Vec::new();
+    for line in lines {
+        if line.is_empty() {
+            break;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            headers.push((k.trim().to_string(), v.trim().to_string()));
+        }
+    }
+
+    let transfer_chunked = headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"))
+        .map(|(_, v)| v.to_ascii_lowercase().contains("chunked"))
+        .unwrap_or(false);
+
+    let body = if transfer_chunked {
+        decode_chunked(body_bytes)?
+    } else if let Some((_, v)) = headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+    {
+        if let Ok(len) = v.parse::<usize>() {
+            body_bytes.get(..len).unwrap_or(body_bytes).to_vec()
+        } else {
+            body_bytes.to_vec()
+        }
+    } else {
+        body_bytes.to_vec()
+    };
+
+    Ok(HttpResponse {
+        status_code,
+        headers,
+        body,
+    })
+}
+
+fn decode_chunked(mut input: &[u8]) -> Result<Vec<u8>, BangumiError> {
+    let mut out = Vec::new();
+
+    loop {
+        let line_end = input
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or_else(|| BangumiError::Parse("chunked长度行不完整".to_string()))?;
+        let (size_line, rest) = input.split_at(line_end);
+        let rest = &rest[2..];
+
+        let size_str = std::str::from_utf8(size_line)
+            .map_err(|e| BangumiError::Parse(format!("chunked长度编码错误: {}", e)))?;
+        let size_str = size_str.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(size_str, 16)
+            .map_err(|_| BangumiError::Parse("chunked长度非法".to_string()))?;
+
+        if size == 0 {
+            break;
+        }
+
+        if rest.len() < size + 2 {
+            return Err(BangumiError::Parse("chunked数据不完整".to_string()));
+        }
+
+        out.extend_from_slice(&rest[..size]);
+        input = &rest[size + 2..];
+    }
+
+    Ok(out)
+}
+
+fn resolve_redirect_url(current: &str, location: &str) -> String {
+    if location.starts_with("https://") {
+        return location.to_string();
+    }
+
+    if location.starts_with('/') {
+        if let Ok((host, port, _)) = parse_https_url(current) {
+            if port == 443 {
+                return format!("https://{}{}", host, location);
+            }
+            return format!("https://{}:{}{}", host, port, location);
+        }
+    }
+
+    location.to_string()
 }
 
 // 直接且明确的API函数
@@ -214,5 +426,21 @@ mod tests {
             Err(BangumiError::InvalidInput(_)) => {},
             _ => panic!("Expected InvalidInput error"),
         }
+    }
+
+    #[test]
+    fn test_decode_chunked() {
+        let chunked = b"4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
+        let decoded = decode_chunked(chunked).expect("decode chunked");
+        assert_eq!(decoded, b"Wikipedia");
+    }
+
+    #[test]
+    fn test_parse_http_response_content_length() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhelloEXTRA";
+        let resp = parse_http_response(raw).expect("parse http");
+        assert_eq!(resp.status_code, 200);
+        assert_eq!(resp.body, b"hello");
+        assert_eq!(resp.header("content-length"), Some("5"));
     }
 }

@@ -77,7 +77,7 @@ dependencies = [
  "embed-resource",
  "fltk",
  "miniserde",
- "minreq",
+ "native-tls",
  "urlencoding",
  "windows-sys 0.61.2",
  "winreg",
@@ -251,15 +251,6 @@ dependencies = [
  "itoa",
  "mini-internal",
  "zmij",
-]
-
-[[package]]
-name = "minreq"
-version = "2.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05015102dad0f7d61691ca347e9d9d9006685a64aefb3d79eecf62665de2153d"
-dependencies = [
- "native-tls",
 ]
 
 [[package]]

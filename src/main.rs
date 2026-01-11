@@ -705,6 +705,15 @@ static VIDEO_EXTENSIONS: &[&str] = &["mp4", "avi", "mkv", "mov", "wmv", "flv", "
 // 支持的字幕文件扩展名常量
 static SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub", "idx", "sup"];
 
+fn ext_in_list_ignore_ascii_case(ext: &str, list: &[&str]) -> bool {
+    for &known in list {
+        if ext.eq_ignore_ascii_case(known) {
+            return true;
+        }
+    }
+    false
+}
+
 /// 查找与视频文件同名的字幕文件
 pub fn find_matching_subtitle_files(video_file_name: &str, base_path: &str) -> Vec<(String, String)> {
     let mut subtitle_files = Vec::new();
@@ -741,7 +750,7 @@ pub fn find_matching_subtitle_files(video_file_name: &str, base_path: &str) -> V
         };
         
         // 检查是否是字幕文件
-        if !SUBTITLE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+        if !ext_in_list_ignore_ascii_case(ext, SUBTITLE_EXTENSIONS) {
             continue;
         }
         
@@ -956,7 +965,7 @@ pub fn load_files_to_file_browser(path_str: &str, browser: &mut HoldBrowser) {
         };
         
         // 只添加视频文件
-        if VIDEO_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+        if ext_in_list_ignore_ascii_case(ext, VIDEO_EXTENSIONS) {
             browser.add(file_name);
         }
     }
