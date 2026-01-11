@@ -16,6 +16,7 @@ use fltk::{
 use std::sync::{Mutex, OnceLock};
 use std::cell::RefCell;
 use std::rc::Rc;
+#[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
 // 引入模块
@@ -1031,10 +1032,34 @@ fn handle_about_menu() {
 fn open_url(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     {
-        // cmd.exe treats characters like & specially unless quoted.
-        let quoted = format!("\"{}\"", url);
-        Command::new("cmd").args(["/C", "start", "", &quoted]).status()?;
-        return Ok(());
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        // SAFETY: ShellExecuteW expects null-terminated UTF-16 strings.
+        let op: Vec<u16> = "open\0".encode_utf16().collect();
+        let file: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
+
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                op.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+
+        // Per ShellExecute docs: return value <= 32 indicates an error.
+        let code = result as isize;
+        if code <= 32 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("ShellExecuteW failed with code {code}"),
+            ));
+        }
+
+        Ok(())
     }
 
     #[cfg(target_os = "macos")]
