@@ -8,7 +8,6 @@ use fltk::{
     enums,
     frame::Frame,
     group::Flex,
-    image,
     input::Input,
     menu::MenuButton,
     prelude::*,
@@ -193,11 +192,7 @@ impl Cuby {
         wind.end();        
         wind.show();
         
-        // 设置窗口图标 - 使用嵌入的图标数据
-        let icon_data = include_bytes!("../images/ice-cubes.png");
-        if let Ok(icon) = image::PngImage::from_data(icon_data) {
-            wind.set_icon(Some(icon));
-        }
+        // 窗口图标由 Windows 资源(ico.rc)提供，避免引入图片解码以减小体积
            
         // 初始化静态路径变量
         BASE_PATH.get_or_init(|| Mutex::new(String::new()));

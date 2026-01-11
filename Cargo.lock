@@ -119,23 +119,23 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
 name = "fltk"
-version = "1.5.9"
+version = "1.5.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecfe1d97c0be7585b46d52c1e563226a6495a993be2c72dcdd03fe79d29b1f2a"
+checksum = "6ef591509a695d1f6ae5a1ff2b50bf98fb96a82c2d1f2a97b9103b762583c915"
 dependencies = [
  "bitflags",
  "crossbeam-channel",
  "fltk-sys",
+ "minipaste",
  "once_cell",
- "paste",
  "ttf-parser",
 ]
 
 [[package]]
 name = "fltk-sys"
-version = "1.5.9"
+version = "1.5.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de39f27a66d3ceefca611ee2db890369c6846fde4de7b5fd7cdedd9ce0c432f8"
+checksum = "0d09bcc449403e8ef87799dc5c5a1e31469ad5affd1bcaaca3a15810aae4ff6f"
 dependencies = [
  "cmake",
  "cmk",
@@ -226,6 +226,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "minipaste"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bbcafc6544efab7decec8e8e63d6e7cbaac0a699a4adead308a80f9c302d6ae"
+dependencies = [
+ "proc-macro2",
+]
+
+[[package]]
 name = "miniserde"
 version = "0.1.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -312,12 +321,6 @@ dependencies = [
  "pkg-config",
  "vcpkg",
 ]
-
-[[package]]
-name = "paste"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pkg-config"
