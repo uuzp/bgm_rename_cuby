@@ -17,7 +17,7 @@ use fltk::{
 use std::sync::{Mutex, OnceLock};
 use std::cell::RefCell;
 use std::rc::Rc;
-use clap::Parser;
+use std::process::Command;
 
 // 引入模块
 mod bangumi_api;
@@ -26,16 +26,62 @@ static BASE_PATH: OnceLock<Mutex<String>> = OnceLock::new();
 static ANIME_PATH: OnceLock<Mutex<String>> = OnceLock::new();
 
 // --- 命令行参数定义 ---
-#[derive(Parser, Debug, Clone)]
-#[command(author, version, about, long_about = None)]
+#[derive(Debug, Clone, Default)]
 struct CliArgs {
     /// 源文件路径（包含视频文件的文件夹）
-    #[arg(short = 'b', long)]
     base_path: Option<String>,
 
     /// 目标文件路径（重命名后文件存放的文件夹）
-    #[arg(short = 'a', long)]
     anime_path: Option<String>,
+}
+
+fn print_help() {
+    println!(
+        "{name} {ver}\n\n用法:\n  {name}.exe -b <源文件夹> -a <目标文件夹>\n\n选项:\n  -b, --base-path, --base_path   源文件夹路径\n  -a, --anime-path, --anime_path 目标文件夹路径\n  -h, --help                    显示帮助\n  -V, --version                 显示版本\n",
+        name = env!("CARGO_PKG_NAME"),
+        ver = env!("CARGO_PKG_VERSION")
+    );
+}
+
+fn parse_cli_args() -> CliArgs {
+    let mut args_iter = std::env::args().skip(1);
+    let mut parsed = CliArgs::default();
+
+    while let Some(arg) = args_iter.next() {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print_help();
+                std::process::exit(0);
+            }
+            "-V" | "--version" => {
+                println!("{}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
+            "-b" | "--base-path" | "--base_path" => {
+                let Some(value) = args_iter.next() else {
+                    eprintln!("缺少 -b/--base-path 参数值\n");
+                    print_help();
+                    std::process::exit(2);
+                };
+                parsed.base_path = Some(value);
+            }
+            "-a" | "--anime-path" | "--anime_path" => {
+                let Some(value) = args_iter.next() else {
+                    eprintln!("缺少 -a/--anime-path 参数值\n");
+                    print_help();
+                    std::process::exit(2);
+                };
+                parsed.anime_path = Some(value);
+            }
+            _ => {
+                eprintln!("未知参数: {arg}\n");
+                print_help();
+                std::process::exit(2);
+            }
+        }
+    }
+
+    parsed
 }
 
 #[derive(Copy, Clone)]
@@ -647,7 +693,7 @@ impl Cuby {
 // main函数
 fn main() {
     // 解析命令行参数
-    let cli_args = CliArgs::parse();
+    let cli_args = parse_cli_args();
     
     let app = Cuby::new(&cli_args);
     app.run();
@@ -730,34 +776,54 @@ pub fn find_matching_subtitle_files(video_file_name: &str, base_path: &str) -> V
     subtitle_files
 }
 
-// 需要添加 regex 依赖: 
-use regex::Regex;
-
 /// 使用正则表达式从路径中提取番剧名
 pub fn extract_anime_name_regex(file_name: &str) -> Option<String> {
     if file_name.starts_with('[') {
-        // 处理带标签格式
-        // 提取两种情况:
-        // 1. [组名][番剧名][其他]
-        // 2. [Rev][组名][番剧名][其他]
-        let re = Regex::new(r"^\[(?:Rev|rev)\]\[[^\]]+\]\[([^\]]+)\]|^\[[^\]]+\]\[([^\]]+)\]").unwrap();
-        if let Some(caps) = re.captures(file_name) {
-            // 第一个捕获组是针对有[Rev]的情况，第二个是没有的情况
-            return caps.get(1).or_else(|| caps.get(2))
-                .map(|m| m.as_str().trim().to_string());
+        // 支持：
+        // 1) [组名][番剧名][其他]
+        // 2) [Rev][组名][番剧名][其他]
+        // 3) [组名]番剧名[其他]
+        let mut rest = file_name;
+        let mut tags: Vec<&str> = Vec::new();
+
+        while let Some(stripped) = rest.strip_prefix('[') {
+            let Some(end) = stripped.find(']') else {
+                break;
+            };
+            let tag = &stripped[..end];
+            tags.push(tag);
+            rest = &stripped[end + 1..];
         }
-          // 处理 [组名]番剧名[其他] 格式
-        let re2 = Regex::new(r"^\[[^\]]+\]\s*([^\[]+)").unwrap();
-        if let Some(caps) = re2.captures(file_name) {
-            return caps.get(1).map(|m| m.as_str().trim().to_string());
+
+        if tags.len() >= 3 && tags[0].eq_ignore_ascii_case("rev") {
+            let name = tags[2].trim();
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
         }
-    } else {
-        // 处理下划线格式
-        return file_name.split_once('_')
-            .map(|(before, _)| before.trim().to_string())
-            .filter(|s| !s.is_empty());
+
+        if tags.len() >= 2 {
+            let name = tags[1].trim();
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+
+        // [组名]番剧名[其他]
+        let after_first = rest.trim_start();
+        if !after_first.is_empty() {
+            let name_part = after_first.split('[').next().unwrap_or("").trim();
+            if !name_part.is_empty() {
+                return Some(name_part.to_string());
+            }
+        }
     }
-    None
+
+    // 下划线格式：番剧名_其他
+    file_name
+        .split_once('_')
+        .map(|(before, _)| before.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// 注册右键菜单
@@ -964,7 +1030,35 @@ pub fn handle_browser_events(browser: &mut HoldBrowser, event: Event) -> bool {
 /// 处理关于菜单
 fn handle_about_menu() {
     let repo_url = "https://github.com/uuzp/bgm_rename_cuby";
-    let _ = webbrowser::open(repo_url);
+    let _ = open_url(repo_url);
+}
+
+fn open_url(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        // cmd.exe treats characters like & specially unless quoted.
+        let quoted = format!("\"{}\"", url);
+        Command::new("cmd").args(["/C", "start", "", &quoted]).status()?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(url).status()?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open").arg(url).status()?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
+    {
+        let _ = url;
+        Ok(())
+    }
 }
 
 /// 清理文件名中的特殊字符，使用全角字符替换
