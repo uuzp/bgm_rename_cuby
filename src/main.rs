@@ -318,11 +318,26 @@ impl Cuby {
         self.info_frame.set_label(message);
     }
 
+    fn reset_search_ui(&mut self) {
+        self.search_browser.clear();
+        self.ui_mode = UiMode::Idle;
+    }
+
+    fn show_invalid_selection(&mut self) {
+        self.search_browser.clear();
+        self.search_browser.add("选择无效或数据不一致");
+        self.set_info("选择无效");
+    }
+
     fn render_subject_list(&mut self, subjects: &[bangumi_api::Subject]) {
         self.search_browser.clear();
         for subject in subjects {
-            self.search_browser
-                .add(&format!("{} ({})", subject.name_cn, subject.name));
+            if subject.name_cn.is_empty() {
+                self.search_browser.add(&subject.name);
+            } else {
+                self.search_browser
+                    .add(&format!("{} ({})", subject.name_cn, subject.name));
+            }
         }
     }
 
@@ -335,10 +350,10 @@ impl Cuby {
         }
 
         for ep in &episodes.items {
-            let name = if !ep.name_cn.is_empty() {
-                ep.name_cn.clone()
+            let name = if ep.name_cn.is_empty() {
+                ep.name.as_str()
             } else {
-                ep.name.clone()
+                ep.name_cn.as_str()
             };
             let display_text = format!("Ep.{:02} - {}", ep.sort, name);
             self.search_browser.add(&display_text);
@@ -356,16 +371,14 @@ impl Cuby {
     /// 处理按钮A点击事件
     fn handle_button_a(&mut self) {
         if update_path(&mut self.anime_path, "select ANIME_PATH") {
-            self.info_frame
-                .set_label(&format!("@ {}", self.anime_path));
+            self.set_info(&format!("@ {}", self.anime_path));
         }
     }
 
     /// 处理按钮B点击事件
     fn handle_button_b(&mut self) {
         if update_path(&mut self.base_path, "select BASE_PATH") {
-            self.info_frame
-                .set_label(&format!("@ {}", self.base_path));
+            self.set_info(&format!("@ {}", self.base_path));
             load_files_to_file_browser(&self.base_path, &mut self.file_browser);
             // 从路径中提取番剧名并填充到搜索框
             if let Some(folder_name) = std::path::Path::new(&self.base_path)
@@ -396,13 +409,14 @@ impl Cuby {
         } else {
             self.set_info(&format!("@ {}", self.anime_path));
         }
-    }    /// 处理搜索逻辑并更新UI
+    }
+
+    /// 处理搜索逻辑并更新UI
     fn handle_search(&mut self, query: &str) {
         match bangumi_api::search_subjects(query) {
             Ok(subjects) => {
                 if subjects.is_empty() {
-                    self.search_browser.clear();
-                    self.ui_mode = UiMode::Idle;
+                    self.reset_search_ui();
                     self.set_info(&format!("未找到与\"{}\"相关的番剧", query));
                 } else {
                     self.render_subject_list(&subjects);
@@ -411,8 +425,7 @@ impl Cuby {
                 }
             }
             Err(err_msg) => {
-                self.search_browser.clear();
-                self.ui_mode = UiMode::Idle;
+                self.reset_search_ui();
                 self.set_info(&format!("搜索失败: {}", err_msg));
             }
         }
@@ -429,9 +442,7 @@ impl Cuby {
             return;
         };
         let Some(selected_subject) = subjects.get(idx).cloned() else {
-            self.search_browser.clear();
-            self.search_browser.add("选择无效或数据不一致");
-            self.set_info("选择无效");
+            self.show_invalid_selection();
             return;
         };
 
@@ -483,8 +494,7 @@ impl Cuby {
                 self.set_info(&message);
                 // 只有操作成功时才清空列表
                 self.file_browser.clear();
-                self.search_browser.clear();
-                self.ui_mode = UiMode::Idle;
+                self.reset_search_ui();
             },
             Err(error) => {
                 // 操作失败时，不清空列表，只显示错误信息
