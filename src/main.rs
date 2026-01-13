@@ -16,6 +16,7 @@ use fltk::{
 use std::sync::{Mutex, OnceLock};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 #[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
@@ -114,6 +115,8 @@ struct Cuby {
     episode_list: Rc<RefCell<Option<bangumi_api::Episodes>>>,
 
     selected_anime_id: Rc<RefCell<Option<String>>>,
+
+    last_opened_url: Option<(String, Instant)>,
 }
 
 impl Cuby {
@@ -233,6 +236,8 @@ impl Cuby {
             search_results: Rc::new(RefCell::new(None)),
             episode_list: Rc::new(RefCell::new(None)),
             selected_anime_id: Rc::new(RefCell::new(None)),
+
+            last_opened_url: None,
         }
     }
 
@@ -488,6 +493,17 @@ impl Cuby {
         };
 
         let url = format!("https://bgm.tv/subject/{}", subject_id);
+
+        // Debounce: our global event polling can observe the same click more than once.
+        // Prevent opening the same URL repeatedly in a short time window.
+        let now = Instant::now();
+        if let Some((last_url, last_at)) = self.last_opened_url.as_ref() {
+            if last_url == &url && now.duration_since(*last_at) < Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.last_opened_url = Some((url.clone(), now));
+
         if let Err(e) = open_url(&url) {
             self.info_frame
                 .set_label(&format!("打开 Bangumi 网页失败: {}", e));
