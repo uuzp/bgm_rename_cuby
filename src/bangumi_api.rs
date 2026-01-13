@@ -18,6 +18,9 @@ use windows_sys::Win32::Networking::WinHttp::{
 };
 
 #[cfg(target_os = "windows")]
+const METHOD_GET_W: [u16; 4] = ['G' as u16, 'E' as u16, 'T' as u16, 0];
+
+#[cfg(target_os = "windows")]
 type HINTERNET = *mut core::ffi::c_void;
 
 #[cfg(target_os = "windows")]
@@ -301,7 +304,6 @@ fn winhttp_get_text(
 
         let host_w = wide_null(&host);
         let path_w = wide_null(&path_and_query);
-        let method_w = wide_null("GET");
         let user_agent_w = wide_null(user_agent);
 
         let session = WinHttpHandle::new(unsafe {
@@ -332,7 +334,7 @@ fn winhttp_get_text(
         let request = WinHttpHandle::new(unsafe {
             WinHttpOpenRequest(
                 connect.get(),
-                method_w.as_ptr(),
+                METHOD_GET_W.as_ptr(),
                 path_w.as_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
