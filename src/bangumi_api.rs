@@ -1,10 +1,27 @@
 // src/bangumi_api.rs
 
 use miniserde::Deserialize;
-use native_tls::TlsConnector;
-use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::time::Duration;
+
+#[cfg(not(windows))]
+use std::io::{Read, Write};
+
+#[cfg(not(windows))]
+use std::net::TcpStream;
+
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Networking::WinHttp::{
+    WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest, WinHttpQueryDataAvailable,
+    WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest,
+    WinHttpSetTimeouts, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_FLAG_SECURE,
+    WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_LOCATION, WINHTTP_QUERY_STATUS_CODE,
+};
+
+#[cfg(target_os = "windows")]
+type HINTERNET = *mut core::ffi::c_void;
+
+#[cfg(not(windows))]
+use native_tls::TlsConnector;
 
 // 配置常量
 const BGM_API_BASE: &str = "https://api.bgm.tv";
@@ -133,12 +150,23 @@ fn https_get_text(
     timeout: Duration,
     max_redirects: usize,
 ) -> Result<String, BangumiError> {
+    #[cfg(target_os = "windows")]
+    {
+        return winhttp_get_text(url, user_agent, timeout, max_redirects);
+    }
+
+    #[cfg(not(windows))]
     let mut current = url.to_string();
+    #[cfg(not(windows))]
     for _ in 0..=max_redirects {
+        #[cfg(not(windows))]
         let (host, port, path_and_query) = parse_https_url(&current)?;
+        #[cfg(not(windows))]
         let bytes = https_get_bytes(&host, port, &path_and_query, user_agent, timeout)?;
+        #[cfg(not(windows))]
         let response = parse_http_response(&bytes)?;
 
+        #[cfg(not(windows))]
         match response.status_code {
             200 => {
                 return String::from_utf8(response.body)
@@ -157,7 +185,10 @@ fn https_get_text(
         }
     }
 
-    Err(BangumiError::Network("重定向次数过多".to_string()))
+    #[cfg(not(windows))]
+    {
+        Err(BangumiError::Network("重定向次数过多".to_string()))
+    }
 }
 
 fn parse_https_url(url: &str) -> Result<(String, u16, String), BangumiError> {
@@ -187,6 +218,7 @@ fn parse_https_url(url: &str) -> Result<(String, u16, String), BangumiError> {
     Ok((host, port, path_part))
 }
 
+#[cfg(not(windows))]
 fn https_get_bytes(
     host: &str,
     port: u16,
@@ -225,12 +257,229 @@ fn https_get_bytes(
     Ok(buf)
 }
 
+#[cfg(target_os = "windows")]
+fn winhttp_get_text(
+    url: &str,
+    user_agent: &str,
+    timeout: Duration,
+    max_redirects: usize,
+) -> Result<String, BangumiError> {
+    let mut current = url.to_string();
+    for _ in 0..=max_redirects {
+        let (host, port, path_and_query) = parse_https_url(&current)?;
+
+        let host_w = wide_null(&host);
+        let path_w = wide_null(&path_and_query);
+        let method_w = wide_null("GET");
+        let user_agent_w = wide_null(user_agent);
+
+        unsafe {
+            let session: HINTERNET = WinHttpOpen(
+                user_agent_w.as_ptr(),
+                WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+            );
+            if session.is_null() {
+                return Err(BangumiError::Network("WinHttpOpen失败".to_string()));
+            }
+
+            let timeout_ms = timeout.as_millis().min(u32::MAX as u128) as i32;
+            let _ = WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms, timeout_ms);
+
+            let connect: HINTERNET = WinHttpConnect(session, host_w.as_ptr(), port, 0);
+            if connect.is_null() {
+                WinHttpCloseHandle(session);
+                return Err(BangumiError::Network("WinHttpConnect失败".to_string()));
+            }
+
+            let request = WinHttpOpenRequest(
+                connect,
+                method_w.as_ptr(),
+                path_w.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                WINHTTP_FLAG_SECURE,
+            );
+            if request.is_null() {
+                WinHttpCloseHandle(connect);
+                WinHttpCloseHandle(session);
+                return Err(BangumiError::Network("WinHttpOpenRequest失败".to_string()));
+            }
+
+            let ok: i32 = WinHttpSendRequest(
+                request,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+            );
+            if ok == 0 {
+                WinHttpCloseHandle(request);
+                WinHttpCloseHandle(connect);
+                WinHttpCloseHandle(session);
+                return Err(BangumiError::Network("WinHttpSendRequest失败".to_string()));
+            }
+
+            let ok: i32 = WinHttpReceiveResponse(request, std::ptr::null_mut());
+            if ok == 0 {
+                WinHttpCloseHandle(request);
+                WinHttpCloseHandle(connect);
+                WinHttpCloseHandle(session);
+                return Err(BangumiError::Network("WinHttpReceiveResponse失败".to_string()));
+            }
+
+            let status_code = query_status_code(request)
+                .ok_or_else(|| BangumiError::Network("读取HTTP状态码失败".to_string()))?;
+
+            if matches!(status_code, 301 | 302 | 303 | 307 | 308) {
+                if let Some(location) = query_header_string(request, WINHTTP_QUERY_LOCATION) {
+                    let next = resolve_redirect_url(&current, &location);
+                    WinHttpCloseHandle(request);
+                    WinHttpCloseHandle(connect);
+                    WinHttpCloseHandle(session);
+                    current = next;
+                    continue;
+                }
+
+                WinHttpCloseHandle(request);
+                WinHttpCloseHandle(connect);
+                WinHttpCloseHandle(session);
+                return Err(BangumiError::Network("HTTP重定向但缺少Location头".to_string()));
+            }
+
+            if status_code == 404 {
+                WinHttpCloseHandle(request);
+                WinHttpCloseHandle(connect);
+                WinHttpCloseHandle(session);
+                return Err(BangumiError::NotFound);
+            }
+            if status_code == 429 {
+                WinHttpCloseHandle(request);
+                WinHttpCloseHandle(connect);
+                WinHttpCloseHandle(session);
+                return Err(BangumiError::RateLimit);
+            }
+            if status_code != 200 {
+                WinHttpCloseHandle(request);
+                WinHttpCloseHandle(connect);
+                WinHttpCloseHandle(session);
+                return Err(BangumiError::Network(format!("HTTP错误: {}", status_code)));
+            }
+
+            let mut body = Vec::new();
+            loop {
+                let mut available: u32 = 0;
+                let ok: i32 = WinHttpQueryDataAvailable(request, &mut available);
+                if ok == 0 {
+                    WinHttpCloseHandle(request);
+                    WinHttpCloseHandle(connect);
+                    WinHttpCloseHandle(session);
+                    return Err(BangumiError::Network("WinHttpQueryDataAvailable失败".to_string()));
+                }
+                if available == 0 {
+                    break;
+                }
+
+                let mut chunk = vec![0u8; available as usize];
+                let mut read: u32 = 0;
+                let ok: i32 =
+                    WinHttpReadData(request, chunk.as_mut_ptr() as *mut _, available, &mut read);
+                if ok == 0 {
+                    WinHttpCloseHandle(request);
+                    WinHttpCloseHandle(connect);
+                    WinHttpCloseHandle(session);
+                    return Err(BangumiError::Network("WinHttpReadData失败".to_string()));
+                }
+                chunk.truncate(read as usize);
+                body.extend_from_slice(&chunk);
+            }
+
+            WinHttpCloseHandle(request);
+            WinHttpCloseHandle(connect);
+            WinHttpCloseHandle(session);
+
+            return String::from_utf8(body)
+                .map_err(|e| BangumiError::Parse(format!("响应文本编码错误: {}", e)));
+        }
+    }
+
+    Err(BangumiError::Network("重定向次数过多".to_string()))
+}
+
+#[cfg(target_os = "windows")]
+fn wide_null(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn query_status_code(request: HINTERNET) -> Option<u32> {
+    let mut status: u32 = 0;
+    let mut len: u32 = std::mem::size_of::<u32>() as u32;
+    let ok: i32 = WinHttpQueryHeaders(
+        request,
+        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+        std::ptr::null(),
+        &mut status as *mut _ as *mut _,
+        &mut len,
+        std::ptr::null_mut(),
+    );
+    if ok == 0 {
+        None
+    } else {
+        Some(status)
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn query_header_string(request: HINTERNET, query: u32) -> Option<String> {
+    let mut len: u32 = 0;
+    let ok: i32 = WinHttpQueryHeaders(
+        request,
+        query,
+        std::ptr::null(),
+        std::ptr::null_mut(),
+        &mut len,
+        std::ptr::null_mut(),
+    );
+    if ok != 0 {
+        return None;
+    }
+    if len == 0 {
+        return None;
+    }
+
+    let mut buf: Vec<u16> = vec![0u16; (len as usize + 1) / 2];
+    let ok: i32 = WinHttpQueryHeaders(
+        request,
+        query,
+        std::ptr::null(),
+        buf.as_mut_ptr() as *mut _,
+        &mut len,
+        std::ptr::null_mut(),
+    );
+    if ok == 0 {
+        return None;
+    }
+
+    if let Some(end) = buf.iter().position(|&c| c == 0) {
+        buf.truncate(end);
+    }
+    Some(String::from_utf16_lossy(&buf))
+}
+
+#[cfg(not(windows))]
 struct HttpResponse {
     status_code: u16,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
 }
 
+#[cfg(not(windows))]
 impl HttpResponse {
     fn header(&self, name: &str) -> Option<&str> {
         self.headers
@@ -240,6 +489,7 @@ impl HttpResponse {
     }
 }
 
+#[cfg(not(windows))]
 fn parse_http_response(bytes: &[u8]) -> Result<HttpResponse, BangumiError> {
     let header_end = bytes
         .windows(4)
@@ -302,6 +552,7 @@ fn parse_http_response(bytes: &[u8]) -> Result<HttpResponse, BangumiError> {
     })
 }
 
+#[cfg(not(windows))]
 fn decode_chunked(mut input: &[u8]) -> Result<Vec<u8>, BangumiError> {
     let mut out = Vec::new();
 
@@ -351,6 +602,30 @@ fn resolve_redirect_url(current: &str, location: &str) -> String {
     location.to_string()
 }
 
+fn percent_encode_path_segment(input: &str) -> String {
+    // RFC 3986 unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+    // Everything else is percent-encoded as UTF-8 bytes.
+    let mut out = String::with_capacity(input.len());
+    for &b in input.as_bytes() {
+        match b {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'.'
+            | b'_'
+            | b'~' => out.push(b as char),
+            _ => {
+                out.push('%');
+                const HEX: &[u8; 16] = b"0123456789ABCDEF";
+                out.push(HEX[(b >> 4) as usize] as char);
+                out.push(HEX[(b & 0x0F) as usize] as char);
+            }
+        }
+    }
+    out
+}
+
 // 直接且明确的API函数
 pub fn search_subjects(keywords: &str) -> Result<Vec<Subject>, BangumiError> {
     let trimmed = keywords.trim();
@@ -361,7 +636,8 @@ pub fn search_subjects(keywords: &str) -> Result<Vec<Subject>, BangumiError> {
         return Err(BangumiError::InvalidInput("搜索关键词过长".to_string()));
     }
     
-    let encoded_keywords = urlencoding::encode(trimmed);    let url = format!(
+    let encoded_keywords = percent_encode_path_segment(trimmed);
+    let url = format!(
         "{}/search/subject/{}?type=2&responseGroup=large&limit=25",
         BGM_API_BASE,
         encoded_keywords
@@ -429,6 +705,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn test_decode_chunked() {
         let chunked = b"4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
         let decoded = decode_chunked(chunked).expect("decode chunked");
@@ -436,6 +713,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn test_parse_http_response_content_length() {
         let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhelloEXTRA";
         let resp = parse_http_response(raw).expect("parse http");

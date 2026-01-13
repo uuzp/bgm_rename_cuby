@@ -5,6 +5,10 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["icon"]
+icon = []
+
 [dependencies]
 fltk = { version = "1.5.22", default-features = false, features = [
     "fltk-bundled",
@@ -13,12 +17,12 @@ fltk = { version = "1.5.22", default-features = false, features = [
     "single-threaded"
 ] }
 miniserde = "0.1.45"
+
+[target.'cfg(not(windows))'.dependencies]
 native-tls = { version = "0.2.14", default-features = true }
-urlencoding = "2.1.3"
-winreg = "0.55.0"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_System_Registry", "Win32_Networking_WinHttp"] }
 
 [build-dependencies]
 embed-resource = "3.0.6"

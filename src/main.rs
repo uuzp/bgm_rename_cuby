@@ -19,6 +19,11 @@ use std::rc::Rc;
 #[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
+// Some bundled FLTK builds reference GDI+ symbols; ensure we link the import lib.
+#[cfg(target_os = "windows")]
+#[link(name = "gdiplus")]
+extern "system" {}
+
 // 引入模块
 mod bangumi_api;
 
@@ -696,8 +701,16 @@ fn main() {
 }
 // 
 use std::env;
-use winreg::enums::*; 
-use winreg::RegKey;
+
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::Registry::{
+    RegCloseKey, RegCreateKeyW, RegDeleteTreeW, RegSetValueExW, HKEY, HKEY_CLASSES_ROOT, REG_SZ,
+};
+
+#[cfg(target_os = "windows")]
+fn wide_null(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
 
 // 支持的视频文件扩展名常量
 static VIDEO_EXTENSIONS: &[&str] = &["mp4", "avi", "mkv", "mov", "wmv", "flv", "webm"];
@@ -833,40 +846,105 @@ pub fn extract_anime_name_regex(file_name: &str) -> Option<String> {
 
 /// 注册右键菜单
 pub fn register_context_menu() {
+    #[cfg(not(target_os = "windows"))]
+    {
+        dialog::message_default("当前平台不支持注册右键菜单");
+        return;
+    }
+
+    #[cfg(target_os = "windows")]
     // 获取当前可执行文件路径
     match env::current_exe() {
         Ok(exe_path_buf) => {
             let exe_path = exe_path_buf.to_string_lossy().to_string();
             let mut errors = Vec::new();
-            let hkey_classes_root = RegKey::predef(HKEY_CLASSES_ROOT);
             let key_name = "Add To Cuby";
             let shell_path = "Directory\\shell";
             
             // 创建右键菜单项
             let command_val = format!("\"{}\" -b \"%1\" -a \"%1\\anime\"", exe_path);
-            match hkey_classes_root.create_subkey(format!("{}\\{}", shell_path, key_name)) {
-                Ok((key, _)) => {
-                    // 设置菜单属性
-                    match (
-                        key.set_value("", &key_name),
-                        key.set_value("Icon", &format!("\"{}\",0", exe_path))
-                    ) {
-                        (Ok(_), Ok(_)) => {},
-                        (Err(e), _) => errors.push(format!("设置菜单默认值失败: {}", e)),
-                        (_, Err(e)) => errors.push(format!("设置菜单图标失败: {}", e)),
+
+            let menu_key_path = format!("{}\\{}", shell_path, key_name);
+            let menu_key_path_w = wide_null(&menu_key_path);
+
+            unsafe {
+                let mut menu_key: HKEY = std::ptr::null_mut();
+                let status = RegCreateKeyW(HKEY_CLASSES_ROOT, menu_key_path_w.as_ptr(), &mut menu_key);
+                if status != 0 {
+                    errors.push(format!(
+                        "创建菜单主键失败: {}",
+                        std::io::Error::from_raw_os_error(status as i32)
+                    ));
+                } else {
+                    let default_value_w = wide_null(key_name);
+                    let icon_value = format!("\"{}\",0", exe_path);
+                    let icon_value_w = wide_null(&icon_value);
+                    let icon_name_w = wide_null("Icon");
+
+                    let s1 = RegSetValueExW(
+                        menu_key,
+                        std::ptr::null(),
+                        0,
+                        REG_SZ,
+                        default_value_w.as_ptr() as *const u8,
+                        (default_value_w.len() * 2) as u32,
+                    );
+                    if s1 != 0 {
+                        errors.push(format!(
+                            "设置菜单默认值失败: {}",
+                            std::io::Error::from_raw_os_error(s1 as i32)
+                        ));
                     }
-                    
-                    // 创建命令子键
-                    match key.create_subkey("command") {
-                        Ok((cmd_key, _)) => {
-                            if let Err(e) = cmd_key.set_value("", &command_val) {
-                                errors.push(format!("设置命令失败: {}", e));
-                            }
-                        },
-                        Err(e) => errors.push(format!("创建命令子键失败: {}", e)),
+
+                    let s2 = RegSetValueExW(
+                        menu_key,
+                        icon_name_w.as_ptr(),
+                        0,
+                        REG_SZ,
+                        icon_value_w.as_ptr() as *const u8,
+                        (icon_value_w.len() * 2) as u32,
+                    );
+                    if s2 != 0 {
+                        errors.push(format!(
+                            "设置菜单图标失败: {}",
+                            std::io::Error::from_raw_os_error(s2 as i32)
+                        ));
                     }
-                },
-                Err(e) => errors.push(format!("创建菜单主键失败: {}", e)),
+
+                    let command_key_path = format!("{}\\command", menu_key_path);
+                    let command_key_path_w = wide_null(&command_key_path);
+                    let mut command_key: HKEY = std::ptr::null_mut();
+                    let s3 = RegCreateKeyW(
+                        HKEY_CLASSES_ROOT,
+                        command_key_path_w.as_ptr(),
+                        &mut command_key,
+                    );
+                    if s3 != 0 {
+                        errors.push(format!(
+                            "创建命令子键失败: {}",
+                            std::io::Error::from_raw_os_error(s3 as i32)
+                        ));
+                    } else {
+                        let cmd_value_w = wide_null(&command_val);
+                        let s4 = RegSetValueExW(
+                            command_key,
+                            std::ptr::null(),
+                            0,
+                            REG_SZ,
+                            cmd_value_w.as_ptr() as *const u8,
+                            (cmd_value_w.len() * 2) as u32,
+                        );
+                        if s4 != 0 {
+                            errors.push(format!(
+                                "设置命令失败: {}",
+                                std::io::Error::from_raw_os_error(s4 as i32)
+                            ));
+                        }
+                        let _ = RegCloseKey(command_key);
+                    }
+
+                    let _ = RegCloseKey(menu_key);
+                }
             }
             
             // 显示结果
@@ -882,37 +960,47 @@ pub fn register_context_menu() {
 
 /// 注销文件夹右键菜单
 pub fn unregister_context_menu() {
-    let hkey_classes_root = RegKey::predef(HKEY_CLASSES_ROOT);
+    #[cfg(not(target_os = "windows"))]
+    {
+        dialog::message_default("当前平台不支持注销右键菜单");
+        return;
+    }
+
     let key_name = "Add To Cuby";
     let key_path = format!("Directory\\shell\\{}", key_name);
     
     // 尝试删除右键菜单项
-    match hkey_classes_root.delete_subkey_all(key_path) {
-        Ok(_) => dialog::message_default("相关注册表项已成功删除"),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        let key_path_w = wide_null(&key_path);
+        let status = RegDeleteTreeW(HKEY_CLASSES_ROOT, key_path_w.as_ptr());
+        if status == 0 {
+            dialog::message_default("相关注册表项已成功删除");
+        } else if status as u32 == 2 {
+            // ERROR_FILE_NOT_FOUND
             dialog::message_default("未找到相关的注册表项，无需注销");
-        },
-        Err(e) => {
-            dialog::message_default(&format!("注销操作时发生错误: {}\n\n请确保以管理员身份运行本程序", e));
-        },
+        } else {
+            dialog::message_default(&format!(
+                "注销操作时发生错误: {}\n\n请确保以管理员身份运行本程序",
+                std::io::Error::from_raw_os_error(status as i32)
+            ));
+        }
     }
 }
-use fltk::dialog::FileDialogType;
 /// 打开文件夹选择器
 pub fn open_folder_selector(title: &str) -> Option<String> {
-    let mut path = String::new();
+    use fltk::dialog::FileDialogType;
+
     let mut chooser = fltk::dialog::NativeFileChooser::new(FileDialogType::BrowseDir);
     chooser.set_title(title);
     chooser.show();
-    if chooser.filename().exists() {
-        if let Some(selected_path) = chooser.filename().to_str() {
-            path = selected_path.to_string();
-        }
-    }
-    if path.is_empty() {
-        None
+
+    let filename = chooser.filename();
+    if filename.exists() {
+        filename.to_str().map(|s| s.to_string())
     } else {
-        Some(path)
+        None
     }
 }
 /// 通用的路径更新函数
@@ -1041,30 +1129,31 @@ fn handle_about_menu() {
 fn open_url(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::UI::Shell::ShellExecuteW;
-        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        use windows_sys::Win32::Foundation::GetLastError;
+        use windows_sys::Win32::UI::Shell::{
+            ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_FLAG_NO_UI,
+        };
+        const SW_SHOWNORMAL: i32 = 1;
 
-        // SAFETY: ShellExecuteW expects null-terminated UTF-16 strings.
         let op: Vec<u16> = "open\0".encode_utf16().collect();
         let file: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
 
-        let result = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                op.as_ptr(),
-                file.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                SW_SHOWNORMAL,
-            )
-        };
+        let mut sei: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+        sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+        sei.fMask = SEE_MASK_FLAG_NO_UI;
+        sei.hwnd = std::ptr::null_mut();
+        sei.lpVerb = op.as_ptr();
+        sei.lpFile = file.as_ptr();
+        sei.lpParameters = std::ptr::null();
+        sei.lpDirectory = std::ptr::null();
+        sei.nShow = SW_SHOWNORMAL;
 
-        // Per ShellExecute docs: return value <= 32 indicates an error.
-        let code = result as isize;
-        if code <= 32 {
+        let ok = unsafe { ShellExecuteExW(&mut sei as *mut _) };
+        if ok == 0 {
+            let err = unsafe { GetLastError() };
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("ShellExecuteW failed with code {code}"),
+                format!("ShellExecuteExW failed (GetLastError={err})"),
             ));
         }
 
