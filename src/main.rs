@@ -314,6 +314,33 @@ impl Cuby {
         self.wind.redraw();
     }
 
+    fn render_subject_list(&mut self, subjects: &[bangumi_api::Subject]) {
+        self.search_browser.clear();
+        for subject in subjects {
+            self.search_browser
+                .add(&format!("{} ({})", subject.name_cn, subject.name));
+        }
+    }
+
+    fn render_episode_list(&mut self, episodes: &bangumi_api::Episodes) {
+        self.search_browser.clear();
+
+        if episodes.items.is_empty() {
+            self.search_browser.add("未能获取到剧集信息或剧集列表为空");
+            return;
+        }
+
+        for ep in &episodes.items {
+            let name = if !ep.name_cn.is_empty() {
+                ep.name_cn.clone()
+            } else {
+                ep.name.clone()
+            };
+            let display_text = format!("Ep.{:02} - {}", ep.sort, name);
+            self.search_browser.add(&display_text);
+        }
+    }
+
     /// 处理按钮A点击事件
     fn handle_button_a(&mut self) {
         if update_path(&mut self.anime_path, "select ANIME_PATH") {
@@ -366,10 +393,7 @@ impl Cuby {
                     self.ui_mode = UiMode::Idle;
                     self.info_frame.set_label(&format!("未找到与\"{}\"相关的番剧", query));
                 } else {
-                    self.search_browser.clear();
-                    for subject in &subjects {
-                        self.search_browser.add(&format!("{} ({})", subject.name_cn, subject.name));
-                    }
+                    self.render_subject_list(&subjects);
                     self.ui_mode = UiMode::SearchResults { subjects };
                     self.info_frame.set_label(&format!("找到 {} 个搜索结果", self.search_browser.size()));
                 }
@@ -404,21 +428,10 @@ impl Cuby {
 
         match bangumi_api::get_episodes(&selected_subject) {
             Ok(episodes) => {
-                self.search_browser.clear();
-
+                self.render_episode_list(&episodes);
                 if episodes.items.is_empty() {
-                    self.search_browser.add("未能获取到剧集信息或剧集列表为空");
                     self.info_frame.set_label("剧集列表为空");
                 } else {
-                    for ep in &episodes.items {
-                        let name = if !ep.name_cn.is_empty() {
-                            ep.name_cn.clone()
-                        } else {
-                            ep.name.clone()
-                        };
-                        let display_text = format!("Ep.{:02} - {}", ep.sort, name);
-                        self.search_browser.add(&display_text);
-                    }
                     self.info_frame
                         .set_label(&format!("已加载 {} 集剧集信息", episodes.items.len()));
                 }
