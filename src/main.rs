@@ -336,6 +336,7 @@ impl Cuby {
 
     fn selected_subject_in_search_results(&mut self) -> Option<bangumi_api::Subject> {
         let UiMode::SearchResults { subjects } = &self.ui_mode else {
+            self.set_info("当前不是番剧搜索结果列表");
             return None;
         };
 
