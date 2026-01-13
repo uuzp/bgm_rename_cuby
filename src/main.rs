@@ -341,6 +341,14 @@ impl Cuby {
         }
     }
 
+    fn selected_search_index(&self) -> Option<usize> {
+        let line = self.search_browser.value();
+        if line <= 0 || line > self.search_browser.size() {
+            return None;
+        }
+        Some((line as usize) - 1)
+    }
+
     /// 处理按钮A点击事件
     fn handle_button_a(&mut self) {
         if update_path(&mut self.anime_path, "select ANIME_PATH") {
@@ -413,12 +421,9 @@ impl Cuby {
             return;
         };
 
-        let line = self.search_browser.value();
-        if line <= 0 || line > self.search_browser.size() {
+        let Some(idx) = self.selected_search_index() else {
             return;
-        }
-
-        let idx = (line as usize) - 1;
+        };
         let Some(selected_subject) = subjects.get(idx).cloned() else {
             self.search_browser.clear();
             self.search_browser.add("选择无效或数据不一致");
@@ -455,12 +460,9 @@ impl Cuby {
             return;
         };
 
-        let line = self.search_browser.value();
-        if line <= 0 || line > self.search_browser.size() {
+        let Some(idx) = self.selected_search_index() else {
             return;
-        }
-
-        let idx = (line as usize) - 1;
+        };
         let Some(subject_id) = subjects.get(idx).map(|s| s.id) else {
             return;
         };
