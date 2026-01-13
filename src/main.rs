@@ -281,32 +281,62 @@ impl Cuby {
     }
 
     fn handle_message(&mut self, msg: Message) -> bool {
-        match msg {
-            Message::Register => register_context_menu(),
-            Message::Logout => unregister_context_menu(),
-            Message::About => handle_about_menu(),
+        let should_continue = match msg {
+            Message::Register => {
+                register_context_menu();
+                true
+            }
+            Message::Logout => {
+                unregister_context_menu();
+                true
+            }
+            Message::About => {
+                handle_about_menu();
+                true
+            }
             Message::Exit => {
                 self.wind.hide();
-                return false;
+                false
             }
-            Message::ButtonA => self.handle_button_a(),
-            Message::ButtonB => self.handle_button_b(),
-            Message::Search => self.handle_search_button(),
-            Message::Start => self.handle_start_button(),
-
-            Message::FileBrowserPush => self.handle_browser_click(true),
-            Message::SearchBrowserPush => self.handle_browser_click(false),
+            Message::ButtonA => {
+                self.handle_button_a();
+                true
+            }
+            Message::ButtonB => {
+                self.handle_button_b();
+                true
+            }
+            Message::Search => {
+                self.handle_search_button();
+                true
+            }
+            Message::Start => {
+                self.handle_start_button();
+                true
+            }
+            Message::FileBrowserPush => {
+                self.handle_browser_click(true);
+                true
+            }
+            Message::SearchBrowserPush => {
+                self.handle_browser_click(false);
+                true
+            }
             Message::SearchBrowserDoubleClick => {
                 self.handle_search_results_double_click();
-                self.redraw_ui();
+                true
             }
             Message::SearchBrowserRightClick => {
                 self.handle_search_results_right_click();
-                self.redraw_ui();
+                true
             }
+        };
+
+        if should_continue {
+            self.redraw_ui();
         }
 
-        true
+        should_continue
     }
 
     fn redraw_ui(&mut self) {
