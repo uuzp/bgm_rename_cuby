@@ -93,9 +93,10 @@ jobs:
             exit 1
           fi
 
-          cp "$win_src" "dist/cuby-windows-x86_64.exe"
-          cp "$linux_src" "dist/cuby-linux-x86_64"
-          cp "$mac_src" "dist/cuby-macos-x86_64"
+          mkdir -p dist/assets
+          cp "$win_src" "dist/assets/cuby-windows-x86_64.exe"
+          cp "$linux_src" "dist/assets/cuby-linux-x86_64"
+          cp "$mac_src" "dist/assets/cuby-macos-x86_64"
 
       - name: Read annotated tag message
         id: tag
@@ -117,8 +118,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/cuby-windows-x86_64.exe
-            dist/cuby-linux-x86_64
-            dist/cuby-macos-x86_64
+            dist/assets/cuby-windows-x86_64.exe
+            dist/assets/cuby-linux-x86_64
+            dist/assets/cuby-macos-x86_64
           body: ${{ steps.tag.outputs.body }}
           generate_release_notes: ${{ steps.tag.outputs.has_body != 'true' }}
