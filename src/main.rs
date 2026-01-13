@@ -366,12 +366,12 @@ impl Cuby {
         }
     }
 
-    fn render_episode_list(&mut self, episodes: &bangumi_api::Episodes) {
+    fn render_episode_list(&mut self, episodes: &bangumi_api::Episodes) -> usize {
         self.search_browser.clear();
 
         if episodes.items.is_empty() {
             self.search_browser.add("未能获取到剧集信息或剧集列表为空");
-            return;
+            return 0;
         }
 
         for ep in &episodes.items {
@@ -383,6 +383,8 @@ impl Cuby {
             let display_text = format!("Ep.{:02} - {}", ep.sort, name);
             self.search_browser.add(&display_text);
         }
+
+        episodes.items.len()
     }
 
     fn selected_search_index(&self) -> Option<usize> {
@@ -465,11 +467,11 @@ impl Cuby {
 
         match bangumi_api::get_episodes(&selected_subject) {
             Ok(episodes) => {
-                self.render_episode_list(&episodes);
-                if episodes.items.is_empty() {
+                let rendered = self.render_episode_list(&episodes);
+                if rendered == 0 {
                     self.set_info("剧集列表为空");
                 } else {
-                    self.set_info(&format!("已加载 {} 集剧集信息", episodes.items.len()));
+                    self.set_info(&format!("已加载 {} 集剧集信息", rendered));
                 }
 
                 self.ui_mode = UiMode::EpisodeList {
