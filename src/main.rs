@@ -283,7 +283,7 @@ impl Cuby {
     fn handle_message(&mut self, msg: Message) -> bool {
         let should_continue = match msg {
             Message::Register => {
-                register_context_menu();
+                self.handle_register_menu();
                 true
             }
             Message::Logout => {
@@ -355,9 +355,18 @@ impl Cuby {
 
     fn on_operation_success(&mut self, message: &str) {
         self.set_info(message);
+        self.base_path.clear();
         self.file_browser.clear();
         self.search_input.set_value("");
         self.reset_search_ui();
+    }
+
+    fn handle_register_menu(&mut self) {
+        if self.anime_path.is_empty() {
+            self.set_info("错误: 未设置目标位置路径（A按钮）");
+            return;
+        }
+        register_context_menu(&self.anime_path);
     }
 
     fn show_invalid_selection(&mut self) {
@@ -863,7 +872,7 @@ pub fn extract_anime_name_regex(file_name: &str) -> Option<String> {
 }
 
 /// 注册右键菜单
-pub fn register_context_menu() {
+pub fn register_context_menu(anime_path: &str) {
     #[cfg(not(target_os = "windows"))]
     {
         dialog::message_default("当前平台不支持注册右键菜单");
@@ -879,8 +888,8 @@ pub fn register_context_menu() {
             let key_name = "Add To Cuby";
             let shell_path = "Directory\\shell";
             
-            // 创建右键菜单项
-            let command_val = format!("\"{}\" -b \"%1\" -a \"%1\\anime\"", exe_path);
+            // 创建右键菜单项：-b 使用右键点击的目录；-a 使用用户配置的目标路径
+            let command_val = format!("\"{}\" -b \"%1\" -a \"{}\"", exe_path, anime_path);
 
             let menu_key_path = format!("{}\\{}", shell_path, key_name);
             let menu_key_path_w = wide_null(&menu_key_path);
