@@ -323,10 +323,34 @@ impl Cuby {
         self.ui_mode = UiMode::Idle;
     }
 
+    fn on_operation_success(&mut self, message: &str) {
+        self.set_info(message);
+        self.reset_search_ui();
+    }
+
     fn show_invalid_selection(&mut self) {
         self.search_browser.clear();
         self.search_browser.add("选择无效或数据不一致");
         self.set_info("选择无效");
+    }
+
+    fn selected_subject_in_search_results(&mut self) -> Option<bangumi_api::Subject> {
+        let UiMode::SearchResults { subjects } = &self.ui_mode else {
+            return None;
+        };
+
+        let Some(idx) = self.selected_search_index() else {
+            self.set_info("请选择一个番剧");
+            return None;
+        };
+
+        match subjects.get(idx).cloned() {
+            Some(subject) => Some(subject),
+            None => {
+                self.show_invalid_selection();
+                None
+            }
+        }
     }
 
     fn render_subject_list(&mut self, subjects: &[bangumi_api::Subject]) {
@@ -434,15 +458,7 @@ impl Cuby {
     /// 处理搜索结果双击事件
     fn handle_search_results_double_click(&mut self) {
         // 仅在“番剧搜索结果列表”状态下生效
-        let UiMode::SearchResults { subjects } = &self.ui_mode else {
-            return;
-        };
-
-        let Some(idx) = self.selected_search_index() else {
-            return;
-        };
-        let Some(selected_subject) = subjects.get(idx).cloned() else {
-            self.show_invalid_selection();
+        let Some(selected_subject) = self.selected_subject_in_search_results() else {
             return;
         };
 
@@ -469,18 +485,11 @@ impl Cuby {
 
     /// 处理搜索结果右键事件：打开 Bangumi 番剧网页
     fn handle_search_results_right_click(&mut self) {
-        let UiMode::SearchResults { subjects } = &self.ui_mode else {
+        let Some(subject) = self.selected_subject_in_search_results() else {
             return;
         };
 
-        let Some(idx) = self.selected_search_index() else {
-            return;
-        };
-        let Some(subject_id) = subjects.get(idx).map(|s| s.id) else {
-            return;
-        };
-
-        let url = format!("https://bgm.tv/subject/{}", subject_id);
+        let url = format!("https://bgm.tv/subject/{}", subject.id);
         if let Err(e) = open_url(&url) {
             self.set_info(&format!("打开 Bangumi 网页失败: {}", e));
         }
@@ -491,10 +500,7 @@ impl Cuby {
         let result = self.execute_operation();
         match result {
             Ok(message) => {
-                self.set_info(&message);
-                // 只有操作成功时才清空列表
-                self.file_browser.clear();
-                self.reset_search_ui();
+                self.on_operation_success(&message);
             },
             Err(error) => {
                 // 操作失败时，不清空列表，只显示错误信息
