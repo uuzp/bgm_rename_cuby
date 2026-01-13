@@ -9,19 +9,24 @@ edition = "2021"
 default = ["icon"]
 icon = []
 
+
 [dependencies]
+miniserde = "0.1.45"
+
+[target.'cfg(not(windows))'.dependencies]
+fltk = { version = "1.5.22", default-features = false, features = [
+    "fltk-bundled",
+    "single-threaded"
+] }
+native-tls = { version = "0.2.14", default-features = true }
+
+[target.'cfg(windows)'.dependencies]
 fltk = { version = "1.5.22", default-features = false, features = [
     "fltk-bundled",
     "no-gdiplus",
     "no-pango",
     "single-threaded"
 ] }
-miniserde = "0.1.45"
-
-[target.'cfg(not(windows))'.dependencies]
-native-tls = { version = "0.2.14", default-features = true }
-
-[target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_System_Registry", "Win32_Networking_WinHttp"] }
 
 [build-dependencies]

@@ -2,8 +2,12 @@ fn main() {
     // Linux: fltk-sys 的 bundled 构建在某些环境下会编进 Cairo 相关代码，但链接阶段未自动补齐 cairo/gobject 库。
     // 这里通过 pkg-config 显式补齐所需的 -L/-l，避免 CI 上出现 undefined symbol: cairo_* / g_object_unref。
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
+        println!("cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR");
+        println!("cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR");
+
         if let Ok(output) = std::process::Command::new("pkg-config")
-            .args(["--libs", "cairo", "gobject-2.0"])
+            .args(["--libs", "cairo", "gobject-2.0", "pangocairo"])
             .output()
         {
             if output.status.success() {
