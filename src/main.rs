@@ -13,7 +13,6 @@ use fltk::{
     prelude::*,
     window::Window,
 };
-use std::sync::{Mutex, OnceLock};
 #[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
@@ -24,27 +23,6 @@ extern "system" {}
 
 // 引入模块
 mod bangumi_api;
-
-static BASE_PATH: OnceLock<Mutex<String>> = OnceLock::new();
-static ANIME_PATH: OnceLock<Mutex<String>> = OnceLock::new();
-
-fn get_static_path(
-    lock: &OnceLock<Mutex<String>>,
-    empty_error: &'static str,
-    lock_error: &'static str,
-    uninit_error: &'static str,
-) -> Result<String, String> {
-    let Some(mutex) = lock.get() else {
-        return Err(uninit_error.to_string());
-    };
-    let Ok(path) = mutex.lock() else {
-        return Err(lock_error.to_string());
-    };
-    if path.is_empty() {
-        return Err(empty_error.to_string());
-    }
-    Ok(path.clone())
-}
 
 // --- 命令行参数定义 ---
 #[derive(Debug, Clone, Default)]
@@ -130,6 +108,10 @@ struct Cuby {
     search_input: Input,
     info_frame: Frame,
     receiver: app::Receiver<Message>,
+
+    base_path: String,
+    anime_path: String,
+
     // 搜索相关状态（不需要 Rc/RefCell：所有写入都发生在事件循环线程内）
     search_results: Option<Vec<bangumi_api::Subject>>,
     episode_list: Option<bangumi_api::Episodes>,
@@ -251,26 +233,20 @@ impl Cuby {
         wind.show();
         
         // 窗口图标由 Windows 资源(ico.rc)提供，避免引入图片解码以减小体积
-           
-        // 初始化静态路径变量
-        BASE_PATH.get_or_init(|| Mutex::new(String::new()));
-        ANIME_PATH.get_or_init(|| Mutex::new(String::new()));        
-        
-        // 从命令行参数初始化路径
-        if let Some(ref base_path_str) = cli_args.base_path {
-            set_static_path(&BASE_PATH, base_path_str);
-            // 加载文件到文件浏览器
-            load_files_to_file_browser(base_path_str, &mut file_browser);
-            // 从路径中提取番剧名并填充到搜索框
-            if let Some(folder_name) = std::path::Path::new(base_path_str).file_name().and_then(|n| n.to_str()) {
+
+        let base_path = cli_args.base_path.clone().unwrap_or_default();
+        let anime_path = cli_args.anime_path.clone().unwrap_or_default();
+
+        if !base_path.is_empty() {
+            load_files_to_file_browser(&base_path, &mut file_browser);
+            if let Some(folder_name) = std::path::Path::new(&base_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+            {
                 if let Some(extracted_name) = extract_anime_name_regex(folder_name) {
                     search_input.set_value(&extracted_name);
                 }
             }
-        }
-        
-        if let Some(ref anime_path_str) = cli_args.anime_path {
-            set_static_path(&ANIME_PATH, anime_path_str);
         }
         
         Self {
@@ -281,6 +257,8 @@ impl Cuby {
             search_input,
             info_frame,
             receiver,
+            base_path,
+            anime_path,
             search_results: None,
             episode_list: None,
             selected_subject_id: None,
@@ -333,18 +311,20 @@ impl Cuby {
 
     /// 处理按钮A点击事件
     fn handle_button_a(&mut self) {
-        if let Some(anime_path) = update_path(&ANIME_PATH, "select ANIME_PATH") {
-            self.info_frame.set_label(&format!("@ {}", anime_path));
+        if update_path(&mut self.anime_path, "select ANIME_PATH") {
+            self.info_frame
+                .set_label(&format!("@ {}", self.anime_path));
         }
     }
 
     /// 处理按钮B点击事件
     fn handle_button_b(&mut self) {
-        if let Some(base_path) = update_path(&BASE_PATH, "select BASE_PATH") {
-            self.info_frame.set_label(&format!("@ {}", base_path));
-            load_files_to_file_browser(&base_path, &mut self.file_browser);
+        if update_path(&mut self.base_path, "select BASE_PATH") {
+            self.info_frame
+                .set_label(&format!("@ {}", self.base_path));
+            load_files_to_file_browser(&self.base_path, &mut self.file_browser);
             // 从路径中提取番剧名并填充到搜索框
-            if let Some(folder_name) = std::path::Path::new(&base_path)
+            if let Some(folder_name) = std::path::Path::new(&self.base_path)
                 .file_name()
                 .and_then(|n| n.to_str())
             {
@@ -368,19 +348,9 @@ impl Cuby {
     /// 处理浏览器单击事件
     fn handle_browser_click(&mut self, is_file_browser: bool) {
         if is_file_browser {
-            // 文件浏览器被点击，显示 BASE_PATH
-            if let Some(mutex) = BASE_PATH.get() {
-                if let Ok(base_path) = mutex.lock() {
-                    self.info_frame.set_label(&format!("@ {}", base_path));
-                }
-            }
+            self.info_frame.set_label(&format!("@ {}", self.base_path));
         } else {
-            // 搜索浏览器被点击，显示 ANIME_PATH
-            if let Some(mutex) = ANIME_PATH.get() {
-                if let Ok(anime_path) = mutex.lock() {
-                    self.info_frame.set_label(&format!("@ {}", anime_path));
-                }
-            }
+            self.info_frame.set_label(&format!("@ {}", self.anime_path));
         }
     }    /// 处理搜索逻辑并更新UI
     fn handle_search(&mut self, query: &str) {
@@ -569,19 +539,15 @@ impl Cuby {
             return Err("错误: 请先搜索并选择番剧".to_string());
         }
 
-        let base_path_str = get_static_path(
-            &BASE_PATH,
-            "错误: 未设置源文件路径（B按钮）",
-            "错误: 无法访问源文件路径",
-            "错误: 未初始化源文件路径",
-        )?;
+        if self.base_path.is_empty() {
+            return Err("错误: 未设置源文件路径（B按钮）".to_string());
+        }
+        if self.anime_path.is_empty() {
+            return Err("错误: 未设置目标位置路径（A按钮）".to_string());
+        }
 
-        let anime_path_str = get_static_path(
-            &ANIME_PATH,
-            "错误: 未设置目标位置路径（A按钮）",
-            "错误: 无法访问目标位置路径",
-            "错误: 未初始化目标位置路径",
-        )?;
+        let base_path_str = self.base_path.clone();
+        let anime_path_str = self.anime_path.clone();
 
         Ok((base_path_str, anime_path_str))
     }
@@ -1047,21 +1013,12 @@ pub fn open_folder_selector(title: &str) -> Option<String> {
     }
 }
 /// 通用的路径更新函数
-pub fn update_path(lock: &OnceLock<Mutex<String>>, title: &str) -> Option<String> {
-    // 打开文件夹选择对话框
-    let selected_path = open_folder_selector(title)?;
-    
-    // 获取已存在的Mutex或初始化一个新的
-    let mutex = lock.get_or_init(|| Mutex::new(String::new()));
-    
-    // 尝试获取锁并更新值
-    match mutex.lock() {
-        Ok(mut path) => {
-            *path = selected_path.clone();
-            Some(selected_path)
-        },
-        Err(_) => None // 获取锁失败
-    }
+pub fn update_path(path: &mut String, title: &str) -> bool {
+    let Some(selected_path) = open_folder_selector(title) else {
+        return false;
+    };
+    *path = selected_path;
+    true
 }
 
 /// 加载文件到文件浏览器
@@ -1231,14 +1188,5 @@ pub fn clean_filename(s: &str) -> String {
      .replace("?", "？")
      .replace("\"", "＂")
      .replace("|", "｜")
-}
-
-/// 设置静态路径变量的通用函数
-fn set_static_path(lock: &OnceLock<Mutex<String>>, path_str: &str) {
-    if let Some(mutex) = lock.get() {
-        if let Ok(mut path) = mutex.lock() {
-            *path = path_str.to_string();
-        }
-    }
 }
 
