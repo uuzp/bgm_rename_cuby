@@ -100,6 +100,16 @@ enum Message {
     SearchBrowserRightClick,
 }
 
+#[derive(Clone)]
+enum UiMode {
+    Idle,
+    SearchResults { subjects: Vec<bangumi_api::Subject> },
+    EpisodeList {
+        subject: bangumi_api::Subject,
+        episodes: bangumi_api::Episodes,
+    },
+}
+
 struct Cuby {
     app: app::App,
     wind: Window,
@@ -112,10 +122,7 @@ struct Cuby {
     base_path: String,
     anime_path: String,
 
-    // 搜索相关状态（不需要 Rc/RefCell：所有写入都发生在事件循环线程内）
-    search_results: Option<Vec<bangumi_api::Subject>>,
-    episode_list: Option<bangumi_api::Episodes>,
-    selected_subject_id: Option<u64>,
+    ui_mode: UiMode,
 }
 
 impl Cuby {
@@ -259,9 +266,7 @@ impl Cuby {
             receiver,
             base_path,
             anime_path,
-            search_results: None,
-            episode_list: None,
-            selected_subject_id: None,
+            ui_mode: UiMode::Idle,
         }
     }
 
@@ -358,27 +363,20 @@ impl Cuby {
             Ok(subjects) => {
                 if subjects.is_empty() {
                     self.search_browser.clear();
-                    self.search_results = None;
-                    self.episode_list = None;
-                    self.selected_subject_id = None;
+                    self.ui_mode = UiMode::Idle;
                     self.info_frame.set_label(&format!("未找到与\"{}\"相关的番剧", query));
                 } else {
                     self.search_browser.clear();
-                    self.search_results = None;
-                    self.episode_list = None;
-                    self.selected_subject_id = None;
                     for subject in &subjects {
                         self.search_browser.add(&format!("{} ({})", subject.name_cn, subject.name));
                     }
-                    self.search_results = Some(subjects);
+                    self.ui_mode = UiMode::SearchResults { subjects };
                     self.info_frame.set_label(&format!("找到 {} 个搜索结果", self.search_browser.size()));
                 }
             }
             Err(err_msg) => {
                 self.search_browser.clear();
-                self.search_results = None;
-                self.episode_list = None;
-                self.selected_subject_id = None;
+                self.ui_mode = UiMode::Idle;
                 self.info_frame.set_label(&format!("搜索失败: {}", err_msg));
             }
         }
@@ -386,39 +384,26 @@ impl Cuby {
 
     /// 处理搜索结果双击事件
     fn handle_search_results_double_click(&mut self) {
-        // 检查当前状态：如果已经在显示剧集信息，则不处理双击事件
-        if self.episode_list.is_some() {
+        // 仅在“番剧搜索结果列表”状态下生效
+        let UiMode::SearchResults { subjects } = &self.ui_mode else {
             return;
-        }
+        };
 
         let line = self.search_browser.value();
         if line <= 0 || line > self.search_browser.size() {
             return;
         }
 
-        let Some(subjects) = self.search_results.as_ref() else {
-            self.search_browser.clear();
-            self.search_browser.add("搜索结果为空");
-            self.episode_list = None;
-            self.selected_subject_id = None;
-            self.info_frame.set_label("搜索结果为空");
-            return;
-        };
-
         let idx = (line as usize) - 1;
-        let Some(selected_subject) = subjects.get(idx) else {
+        let Some(selected_subject) = subjects.get(idx).cloned() else {
             self.search_browser.clear();
             self.search_browser.add("选择无效或数据不一致");
-            self.episode_list = None;
-            self.selected_subject_id = None;
             self.info_frame.set_label("选择无效");
             return;
         };
 
-        let subject_id = selected_subject.id;
-        match bangumi_api::get_episodes(selected_subject) {
+        match bangumi_api::get_episodes(&selected_subject) {
             Ok(episodes) => {
-                self.selected_subject_id = Some(subject_id);
                 self.search_browser.clear();
 
                 if episodes.items.is_empty() {
@@ -438,33 +423,30 @@ impl Cuby {
                         .set_label(&format!("已加载 {} 集剧集信息", episodes.items.len()));
                 }
 
-                self.episode_list = Some(episodes);
+                self.ui_mode = UiMode::EpisodeList {
+                    subject: selected_subject,
+                    episodes,
+                };
             }
             Err(err_msg) => {
-                self.search_browser.clear();
-                self.search_browser.add(&format!("获取剧集列表失败: {}", err_msg));
-                self.episode_list = None;
-                self.selected_subject_id = None;
-                self.info_frame.set_label("获取剧集信息失败");
+                // 保持搜索结果列表不变，允许用户重试
+                self.info_frame
+                    .set_label(&format!("获取剧集信息失败: {}", err_msg));
             }
         }
     }
 
     /// 处理搜索结果右键事件：打开 Bangumi 番剧网页
     fn handle_search_results_right_click(&mut self) {
-        // 仅在“番剧搜索结果列表”状态下生效；剧集列表右键不处理
-        if self.episode_list.is_some() {
+        let UiMode::SearchResults { subjects } = &self.ui_mode else {
             return;
-        }
+        };
 
         let line = self.search_browser.value();
         if line <= 0 || line > self.search_browser.size() {
             return;
         }
 
-        let Some(subjects) = self.search_results.as_ref() else {
-            return;
-        };
         let idx = (line as usize) - 1;
         let Some(subject_id) = subjects.get(idx).map(|s| s.id) else {
             return;
@@ -486,9 +468,7 @@ impl Cuby {
                 // 只有操作成功时才清空列表
                 self.file_browser.clear();
                 self.search_browser.clear();
-                self.search_results = None;
-                self.episode_list = None;
-                self.selected_subject_id = None;
+                self.ui_mode = UiMode::Idle;
             },
             Err(error) => {
                 // 操作失败时，不清空列表，只显示错误信息
@@ -505,14 +485,16 @@ impl Cuby {
         // 收集源文件
         let source_files = collect_source_files_from_browser(&self.file_browser);
 
-        // 获取剧集数据
-        let ep_collection = self
-            .episode_list
-            .as_ref()
-            .ok_or_else(|| "错误: 请先搜索并选择番剧".to_string())?;
+        let UiMode::EpisodeList { subject, episodes } = &self.ui_mode else {
+            return Err("错误: 请先搜索并选择番剧".to_string());
+        };
 
-        // 获取番剧名称和年份
-        let (anime_display_name, year) = self.get_selected_anime_details(ep_collection)?;
+        let year = episodes.year.to_string();
+        let anime_display_name = if !subject.name_cn.is_empty() {
+            subject.name_cn.clone()
+        } else {
+            subject.name.clone()
+        };
 
         // 创建目标目录
         let target_anime_dir = self.prepare_target_directory(&anime_path_str, &anime_display_name, &year)?;
@@ -521,7 +503,7 @@ impl Cuby {
         let (successful, failed, _errors) = self.execute_file_operations(
             &source_files,
             &base_path_str,
-            ep_collection,
+            episodes,
             &target_anime_dir,
         );
 
@@ -535,7 +517,7 @@ impl Cuby {
     /// 统一验证函数
     fn is_check(&self) -> Result<(String, String), String> {
         // 验证剧集信息
-        if self.episode_list.is_none() {
+        if !matches!(self.ui_mode, UiMode::EpisodeList { .. }) {
             return Err("错误: 请先搜索并选择番剧".to_string());
         }
 
@@ -564,34 +546,7 @@ impl Cuby {
         self.execute_file_renaming(source_files, base_path_str, &formatted_episode_names, target_anime_dir)
     }
 
-    /// 获取选定的番剧名称和年份
-    fn get_selected_anime_details(
-        &self,
-        episodes: &bangumi_api::Episodes,
-    ) -> Result<(String, String), String> {
-        let year = episodes.year.to_string();
-
-        let selected_id = self
-            .selected_subject_id
-            .ok_or_else(|| "错误: 请先搜索并选择番剧".to_string())?;
-
-        // 从搜索结果中找到对应的番剧
-        match self.search_results.as_ref() {
-            Some(subjects) => {
-                if let Some(selected_subject) = subjects.iter().find(|subject| subject.id == selected_id) {
-                    let anime_display_name = if !selected_subject.name_cn.is_empty() {
-                        selected_subject.name_cn.clone()
-                    } else {
-                        selected_subject.name.clone()
-                    };
-                    Ok((anime_display_name, year))
-                } else {
-                    Err("错误: 在搜索结果中未找到选中的番剧".to_string())
-                }
-            }
-            None => Err("错误: 搜索结果为空".to_string()),
-        }
-    }/// 准备目标目录
+    /// 准备目标目录
     fn prepare_target_directory(&self, anime_path_root_str: &str, anime_display_name: &str, year: &str) -> Result<std::path::PathBuf, String> {
         let cleaned_anime_name_for_folder = clean_filename(anime_display_name);
         let target_anime_folder_name = format!("{}({})", cleaned_anime_name_for_folder, year);
