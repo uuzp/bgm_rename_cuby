@@ -53,16 +53,6 @@ jobs:
             libfontconfig1-dev libfreetype6-dev \
             libcairo2-dev libglib2.0-dev libpango1.0-dev
 
-      - name: Debug pkg-config (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euxo pipefail
-          pkg-config --version
-          pkg-config --modversion cairo gobject-2.0 glib-2.0 pango pangocairo
-          pkg-config --libs cairo gobject-2.0 glib-2.0
-          pkg-config --libs pango pangocairo
-
       - name: Build (release)
         run: cargo build --release
 
@@ -99,7 +89,7 @@ jobs:
             echo "has_body=false" >> "$GITHUB_OUTPUT"
           fi
           {
-            echo "body<<'EOF'"
+            echo "body<<EOF"
             echo "$body"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
