@@ -543,13 +543,8 @@ impl Cuby {
         Ok(format!("完成: {}成功 {}失败", successful, failed))
     }
 
-    /// 统一验证函数
+    /// 统一验证：路径是否已设置
     fn is_check(&self) -> Result<(String, String), String> {
-        // 验证剧集信息
-        if !matches!(self.ui_mode, UiMode::EpisodeList { .. }) {
-            return Err("错误: 请先搜索并选择番剧".to_string());
-        }
-
         if self.base_path.is_empty() {
             return Err("错误: 未设置源文件路径（B按钮）".to_string());
         }
