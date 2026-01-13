@@ -144,6 +144,7 @@ fn fetch_json<T: Deserialize>(url: &str) -> Result<T, BangumiError> {
         .map_err(|e| BangumiError::Parse(format!("JSON解析失败: {}", e)))
 }
 
+#[inline(never)]
 fn https_get_text(
     url: &str,
     user_agent: &str,
@@ -258,6 +259,7 @@ fn https_get_bytes(
 }
 
 #[cfg(target_os = "windows")]
+#[inline(never)]
 fn winhttp_get_text(
     url: &str,
     user_agent: &str,

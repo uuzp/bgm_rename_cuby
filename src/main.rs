@@ -16,7 +16,6 @@ use fltk::{
 use std::sync::{Mutex, OnceLock};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 #[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
@@ -100,6 +99,11 @@ enum Message {
     ButtonB,
     Search,
     Start,
+
+    FileBrowserPush,
+    SearchBrowserPush,
+    SearchBrowserDoubleClick,
+    SearchBrowserRightClick,
 }
 
 struct Cuby {
@@ -115,8 +119,6 @@ struct Cuby {
     episode_list: Rc<RefCell<Option<bangumi_api::Episodes>>>,
 
     selected_anime_id: Rc<RefCell<Option<String>>>,
-
-    last_opened_url: Option<(String, Instant)>,
 }
 
 impl Cuby {
@@ -133,6 +135,8 @@ impl Cuby {
         
         // 上区域：菜单按钮、按钮B、按钮A、搜索框和搜索按钮
         let mut top_flex = Flex::default().row();
+
+        let sender_menu = sender.clone();
         
         let mut menu_btn = MenuButton::default().with_label("菜单");
         menu_btn.add_choice("注册");
@@ -141,22 +145,22 @@ impl Cuby {
         menu_btn.add_choice("退出");
         menu_btn.set_callback(move |m| {
             match m.choice().unwrap().as_str() {
-                "注册" => sender.send(Message::Register),
-                "注销" => sender.send(Message::Logout),
-                "关于" => sender.send(Message::About),
-                "退出" => sender.send(Message::Exit),
+                "注册" => sender_menu.send(Message::Register),
+                "注销" => sender_menu.send(Message::Logout),
+                "关于" => sender_menu.send(Message::About),
+                "退出" => sender_menu.send(Message::Exit),
                 _ => (),
             }
         });
         
         let mut btn_b = Button::default().with_label("|🌀|");
-        btn_b.emit(sender, Message::ButtonB);
-          let mut btn_a = Button::default().with_label("|🎬|");
-        btn_a.emit(sender, Message::ButtonA);
+        btn_b.emit(sender.clone(), Message::ButtonB);
+        let mut btn_a = Button::default().with_label("|🎬|");
+        btn_a.emit(sender.clone(), Message::ButtonA);
         
         let mut search_input = Input::default(); 
         let mut search_btn = Button::default().with_label("🔍");
-        search_btn.emit(sender, Message::Search);
+        search_btn.emit(sender.clone(), Message::Search);
 
         top_flex.fixed(&search_input, 345); 
         top_flex.fixed(&search_btn, 50);
@@ -169,9 +173,39 @@ impl Cuby {
         
         let mut file_browser = HoldBrowser::default();
         file_browser.set_selection_color(enums::Color::from_hex_str("#9999FF").unwrap()); 
+
+        {
+            let sender_file = sender.clone();
+            let mut drag_item: i32 = -1;
+            file_browser.handle(move |browser, event| match event {
+                Event::Push => {
+                    sender_file.send(Message::FileBrowserPush);
+                    true
+                }
+                Event::Drag | Event::Released => handle_browser_events(browser, event, &mut drag_item),
+                _ => false,
+            });
+        }
         
         let mut search_browser = HoldBrowser::default();
         search_browser.set_selection_color(enums::Color::from_hex_str("#39C5BB").unwrap()); 
+
+        {
+            let sender_search = sender.clone();
+            search_browser.handle(move |_browser, event| match event {
+                Event::Push => {
+                    if app::event_button() == 3 {
+                        sender_search.send(Message::SearchBrowserRightClick);
+                    } else if app::event_clicks() {
+                        sender_search.send(Message::SearchBrowserDoubleClick);
+                    } else {
+                        sender_search.send(Message::SearchBrowserPush);
+                    }
+                    true
+                }
+                _ => false,
+            });
+        }
         mid_flex.fixed(&search_browser, 400);
         mid_flex.end();          
         // 下区域：路径信息Frame和开始按钮
@@ -182,7 +216,7 @@ impl Cuby {
         // 创建一个垂直布局来包含按钮和底部边距
         let mut btn_container = Flex::default().column();
         let mut start_btn = Button::default().with_label("开始");
-        start_btn.emit(sender, Message::Start);
+        start_btn.emit(sender.clone(), Message::Start);
         
         let bottom_margin = Frame::default();
         btn_container.fixed(&bottom_margin, 2);
@@ -236,8 +270,6 @@ impl Cuby {
             search_results: Rc::new(RefCell::new(None)),
             episode_list: Rc::new(RefCell::new(None)),
             selected_anime_id: Rc::new(RefCell::new(None)),
-
-            last_opened_url: None,
         }
     }
 
@@ -260,52 +292,34 @@ impl Cuby {
                     },                    
                     Message::ButtonA => {
                         self.handle_button_a();
-                    }
+                    },
                     Message::ButtonB => {
                         self.handle_button_b();
                     },
                     Message::Search => {
                         self.handle_search_button();
-                    },                      Message::Start => {
+                    },
+                    Message::Start => {
                         self.handle_start_button();
                     },
+
+                    Message::FileBrowserPush => {
+                        self.handle_browser_click(true);
+                    },
+                    Message::SearchBrowserPush => {
+                        self.handle_browser_click(false);
+                    },
+                    Message::SearchBrowserDoubleClick => {
+                        self.handle_search_results_double_click();
+                        self.info_frame.redraw();
+                        self.wind.redraw();
+                    },
+                    Message::SearchBrowserRightClick => {
+                        self.handle_search_results_right_click();
+                        self.info_frame.redraw();
+                        self.wind.redraw();
+                    },
                 }
-            } else {
-                // 如果没有消息，检查是否有浏览器事件
-                if let Some(widget) = app::belowmouse::<HoldBrowser>() {
-                    let event = app::event();
-                    
-                    match (widget.as_widget_ptr() == self.file_browser.as_widget_ptr(), event) {
-                        // 文件浏览器事件
-                        (true, Event::Push) => {
-                            self.handle_browser_click(true); // true 表示文件浏览器
-                        }
-                        (true, drag_event) if handle_browser_events(&mut self.file_browser, drag_event) => {
-                            // 拖拽事件已处理
-                        }
-                        // 搜索浏览器事件
-                        (false, Event::Push) if app::event_button() == 3 => {
-                            // 右键：在番剧列表中打开 Bangumi 网页
-                            self.handle_search_results_right_click();
-                            self.info_frame.redraw();
-                            self.wind.redraw();
-                        }
-                        (false, Event::Push) if app::event_clicks() => {
-                            // 双击事件
-                            self.handle_search_results_double_click();
-                            self.info_frame.redraw();
-                            self.wind.redraw();
-                        }
-                        (false, Event::Push) => {
-                            // 单击事件
-                            self.handle_browser_click(false); // false 表示搜索浏览器
-                        }
-                        _ => {
-                            // 其他事件不处理
-                        }
-                    }
-                }
-                
             }
         }
     }
@@ -394,11 +408,6 @@ impl Cuby {
 
     /// 处理搜索结果双击事件
     fn handle_search_results_double_click(&mut self) {
-        // 确保是双击事件
-        if !app::event_clicks() {
-            return;
-        }
-
         // 检查当前状态：如果已经在显示剧集信息，则不处理双击事件
         if self.episode_list.borrow().is_some() {
             return;
@@ -493,17 +502,6 @@ impl Cuby {
         };
 
         let url = format!("https://bgm.tv/subject/{}", subject_id);
-
-        // Debounce: our global event polling can observe the same click more than once.
-        // Prevent opening the same URL repeatedly in a short time window.
-        let now = Instant::now();
-        if let Some((last_url, last_at)) = self.last_opened_url.as_ref() {
-            if last_url == &url && now.duration_since(*last_at) < Duration::from_millis(800) {
-                return;
-            }
-        }
-        self.last_opened_url = Some((url.clone(), now));
-
         if let Err(e) = open_url(&url) {
             self.info_frame
                 .set_label(&format!("打开 Bangumi 网页失败: {}", e));
@@ -1125,14 +1123,14 @@ pub fn collect_source_files_from_browser(file_browser: &HoldBrowser) -> Vec<Stri
 }
 
 /// 处理文件浏览器中的 Drag 事件
-fn handle_browser_drag_event(browser: &mut HoldBrowser, drag_item_ptr: *mut i32) -> bool {
+fn handle_browser_drag_event(browser: &mut HoldBrowser, drag_item: &mut i32) -> bool {
     let _y = app::event_y(); // y 坐标可能用于更精确的行计算，但当前未使用
     let current_item_under_mouse = browser.value(); // 获取鼠标当前悬停或选中的行
 
-    let initial_drag_item_val = unsafe { *drag_item_ptr }; // 读取当前拖拽项的值
+    let initial_drag_item_val = *drag_item; // 读取当前拖拽项的值
 
     if initial_drag_item_val < 0 { // 如果 drag_item 小于0，表示这是拖拽的开始
-        unsafe { *drag_item_ptr = current_item_under_mouse; } // 记录开始拖拽的项
+        *drag_item = current_item_under_mouse; // 记录开始拖拽的项
         return true;
     }
     
@@ -1144,7 +1142,7 @@ fn handle_browser_drag_event(browser: &mut HoldBrowser, drag_item_ptr: *mut i32)
         browser.set_text(initial_drag_item_val, &text2); // 将原拖拽项的内容设置为新位置项的内容
         browser.set_text(current_item_under_mouse, &text1); // 将新位置项的内容设置为原拖拽项的内容
           
-        unsafe { *drag_item_ptr = current_item_under_mouse; } // 更新拖拽的项为当前鼠标下的项
+        *drag_item = current_item_under_mouse; // 更新拖拽的项为当前鼠标下的项
         browser.select(current_item_under_mouse); // 保持选中新位置的项
         browser.redraw();
         return true;
@@ -1153,19 +1151,16 @@ fn handle_browser_drag_event(browser: &mut HoldBrowser, drag_item_ptr: *mut i32)
 }
 
 /// 处理文件浏览器中的 Released 事件
-fn handle_browser_released_event(drag_item_ptr: *mut i32) -> bool {
-    unsafe { *drag_item_ptr = -1; } // 重置拖拽项
+fn handle_browser_released_event(drag_item: &mut i32) -> bool {
+    *drag_item = -1; // 重置拖拽项
     true
 }
 
 /// 处理文件浏览器事件
-pub fn handle_browser_events(browser: &mut HoldBrowser, event: Event) -> bool {
-    // 使用静态变量来跟踪拖放项
-    static mut DRAG_ITEM: i32 = -1;
-    
+pub fn handle_browser_events(browser: &mut HoldBrowser, event: Event, drag_item: &mut i32) -> bool {
     match event {
-        Event::Drag => handle_browser_drag_event(browser, std::ptr::addr_of_mut!(DRAG_ITEM)),
-        Event::Released => handle_browser_released_event(std::ptr::addr_of_mut!(DRAG_ITEM)),
+        Event::Drag => handle_browser_drag_event(browser, drag_item),
+        Event::Released => handle_browser_released_event(drag_item),
         _ => false,
     }
 }
