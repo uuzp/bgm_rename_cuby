@@ -355,6 +355,8 @@ impl Cuby {
 
     fn on_operation_success(&mut self, message: &str) {
         self.set_info(message);
+        self.file_browser.clear();
+        self.search_input.set_value("");
         self.reset_search_ui();
     }
 
@@ -567,10 +569,6 @@ impl Cuby {
             episodes,
             &target_anime_dir,
         );
-
-        // 重新加载文件列表并清空搜索框
-        load_files_to_file_browser(&base_path_str, &mut self.file_browser);
-        self.search_input.set_value("");
 
         Ok(format!("完成: {}成功 {}失败", successful, failed))
     }
