@@ -10,8 +10,25 @@ permissions:
   contents: write
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            os: windows-latest
+            bin_path: target/release/cuby.exe
+            artifact: cuby-windows-x86_64
+          - name: linux-x86_64
+            os: ubuntu-latest
+            bin_path: target/release/cuby
+            artifact: cuby-linux-x86_64
+          - name: macos-x86_64
+            os: macos-latest
+            bin_path: target/release/cuby
+            artifact: cuby-macos-x86_64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,21 +39,60 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxext-dev libxft-dev libxinerama-dev \
+            libxcursor-dev libxrender-dev libxfixes-dev \
+            libgl1-mesa-dev
+
       - name: Build (release)
         run: cargo build --release
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cuby-windows-x86_64
-          path: target/release/cuby.exe
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.bin_path }}
+
+  release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for tag message)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Read annotated tag message
+        id: tag
+        shell: bash
+        run: |
+          body="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)')"
+          if [ -n "${body}" ]; then
+            echo "has_body=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_body=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "body<<'EOF'"
+            echo "$body"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: target/release/cuby.exe
-          body: |
-            新增右键打开网页的功能
-            优化大量代码结构
-            精简依赖，大幅减少二进制文件体积
+          files: |
+            dist/**/cuby*
+          body: ${{ steps.tag.outputs.body }}
+          generate_release_notes: ${{ steps.tag.outputs.has_body != 'true' }}
