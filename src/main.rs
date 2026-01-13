@@ -505,11 +505,7 @@ impl Cuby {
         };
 
         let year = episodes.year.to_string();
-        let anime_display_name = if !subject.name_cn.is_empty() {
-            subject.name_cn.clone()
-        } else {
-            subject.name.clone()
-        };
+        let anime_display_name = subject.display_name().to_string();
 
         // 创建目标目录
         let target_anime_dir = self.prepare_target_directory(&anime_path_str, &anime_display_name, &year)?;

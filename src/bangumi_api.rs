@@ -110,6 +110,14 @@ pub struct Episodes {
 }
 
 impl Subject {
+    pub fn display_name(&self) -> &str {
+        if !self.name_cn.is_empty() {
+            &self.name_cn
+        } else {
+            &self.name
+        }
+    }
+
     pub fn year(&self) -> Option<i32> {
         self.air_date
             .as_ref()
