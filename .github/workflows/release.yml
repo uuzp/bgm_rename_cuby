@@ -78,6 +78,14 @@ jobs:
         with:
           path: dist
 
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp "dist/cuby-windows-x86_64/cuby.exe" "dist/cuby-windows-x86_64.exe"
+          cp "dist/cuby-linux-x86_64/cuby" "dist/cuby-linux-x86_64"
+          cp "dist/cuby-macos-x86_64/cuby" "dist/cuby-macos-x86_64"
+
       - name: Read annotated tag message
         id: tag
         shell: bash
@@ -98,6 +106,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/**/cuby*
+            dist/cuby-windows-x86_64.exe
+            dist/cuby-linux-x86_64
+            dist/cuby-macos-x86_64
           body: ${{ steps.tag.outputs.body }}
           generate_release_notes: ${{ steps.tag.outputs.has_body != 'true' }}
