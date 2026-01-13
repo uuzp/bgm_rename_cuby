@@ -207,7 +207,7 @@ fn https_get_text(
                     .map_err(|e| BangumiError::Parse(format!("响应文本编码错误: {}", e).into()));
             }
             301 | 302 | 303 | 307 | 308 => {
-                let Some(location) = response.header("location") else {
+                let Some(location) = response.location() else {
                     return Err(BangumiError::Network("HTTP重定向但缺少Location头".into()));
                 };
                 current = resolve_redirect_url(&current, location);
@@ -490,17 +490,14 @@ unsafe fn query_header_string(request: HINTERNET, query: u32) -> Option<String> 
 #[cfg(not(windows))]
 struct HttpResponse {
     status_code: u16,
-    headers: Vec<(String, String)>,
+    location: Option<String>,
     body: Vec<u8>,
 }
 
 #[cfg(not(windows))]
 impl HttpResponse {
-    fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.as_str())
+    fn location(&self) -> Option<&str> {
+        self.location.as_deref()
     }
 }
 
@@ -529,40 +526,44 @@ fn parse_http_response(bytes: &[u8]) -> Result<HttpResponse, BangumiError> {
         .parse()
         .map_err(|_| BangumiError::Parse("HTTP状态码非法".into()))?;
 
-    let mut headers = Vec::new();
+    let mut location: Option<String> = None;
+    let mut transfer_chunked = false;
+    let mut content_length: Option<usize> = None;
     for line in lines {
         if line.is_empty() {
             break;
         }
         if let Some((k, v)) = line.split_once(':') {
-            headers.push((k.trim().to_string(), v.trim().to_string()));
+            let key = k.trim();
+            let value = v.trim();
+            if key.eq_ignore_ascii_case("location") {
+                location = Some(value.to_string());
+                continue;
+            }
+            if key.eq_ignore_ascii_case("transfer-encoding") {
+                transfer_chunked = value
+                    .split(',')
+                    .any(|part| part.trim().eq_ignore_ascii_case("chunked"));
+                continue;
+            }
+            if key.eq_ignore_ascii_case("content-length") {
+                content_length = value.parse::<usize>().ok();
+                continue;
+            }
         }
     }
 
-    let transfer_chunked = headers
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"))
-        .map(|(_, v)| v.to_ascii_lowercase().contains("chunked"))
-        .unwrap_or(false);
-
     let body = if transfer_chunked {
         decode_chunked(body_bytes)?
-    } else if let Some((_, v)) = headers
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
-    {
-        if let Ok(len) = v.parse::<usize>() {
-            body_bytes.get(..len).unwrap_or(body_bytes).to_vec()
-        } else {
-            body_bytes.to_vec()
-        }
+    } else if let Some(len) = content_length {
+        body_bytes.get(..len).unwrap_or(body_bytes).to_vec()
     } else {
         body_bytes.to_vec()
     };
 
     Ok(HttpResponse {
         status_code,
-        headers,
+        location,
         body,
     })
 }
@@ -734,6 +735,5 @@ mod tests {
         let resp = parse_http_response(raw).expect("parse http");
         assert_eq!(resp.status_code, 200);
         assert_eq!(resp.body, b"hello");
-        assert_eq!(resp.header("content-length"), Some("5"));
     }
 }
