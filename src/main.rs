@@ -28,6 +28,24 @@ mod bangumi_api;
 static BASE_PATH: OnceLock<Mutex<String>> = OnceLock::new();
 static ANIME_PATH: OnceLock<Mutex<String>> = OnceLock::new();
 
+fn get_static_path(
+    lock: &OnceLock<Mutex<String>>,
+    empty_error: &'static str,
+    lock_error: &'static str,
+    uninit_error: &'static str,
+) -> Result<String, String> {
+    let Some(mutex) = lock.get() else {
+        return Err(uninit_error.to_string());
+    };
+    let Ok(path) = mutex.lock() else {
+        return Err(lock_error.to_string());
+    };
+    if path.is_empty() {
+        return Err(empty_error.to_string());
+    }
+    Ok(path.clone())
+}
+
 // --- 命令行参数定义 ---
 #[derive(Debug, Clone, Default)]
 struct CliArgs {
@@ -322,27 +340,23 @@ impl Cuby {
 
     /// 处理按钮A点击事件
     fn handle_button_a(&mut self) {
-        update_path(&ANIME_PATH, "select ANIME_PATH");
-        if let Some(mutex) = ANIME_PATH.get() {
-            if let Ok(anime_path) = mutex.lock() {
-                self.info_frame.set_label(&format!("@ {}", anime_path));
-            }
+        if let Some(anime_path) = update_path(&ANIME_PATH, "select ANIME_PATH") {
+            self.info_frame.set_label(&format!("@ {}", anime_path));
         }
     }
 
     /// 处理按钮B点击事件
     fn handle_button_b(&mut self) {
-        update_path(&BASE_PATH, "select BASE_PATH");
-        
-        if let Some(mutex) = BASE_PATH.get() {
-            if let Ok(base_path) = mutex.lock() {
-                self.info_frame.set_label(&format!("@ {}", base_path));
-                load_files_to_file_browser(&base_path, &mut self.file_browser);
-                // 从路径中提取番剧名并填充到搜索框
-                if let Some(folder_name) = std::path::Path::new(&*base_path).file_name().and_then(|n| n.to_str()) {
-                    if let Some(extracted_name) = extract_anime_name_regex(folder_name) {
-                        self.search_input.set_value(&extracted_name);
-                    }
+        if let Some(base_path) = update_path(&BASE_PATH, "select BASE_PATH") {
+            self.info_frame.set_label(&format!("@ {}", base_path));
+            load_files_to_file_browser(&base_path, &mut self.file_browser);
+            // 从路径中提取番剧名并填充到搜索框
+            if let Some(folder_name) = std::path::Path::new(&base_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+            {
+                if let Some(extracted_name) = extract_anime_name_regex(folder_name) {
+                    self.search_input.set_value(&extracted_name);
                 }
             }
         }
@@ -562,33 +576,19 @@ impl Cuby {
             return Err("错误: 请先搜索并选择番剧".to_string());
         }
 
-        // 验证BASE_PATH
-        let base_path_str = if let Some(mutex) = BASE_PATH.get() {
-            if let Ok(path) = mutex.lock() {
-                if path.is_empty() {
-                    return Err("错误: 未设置源文件路径（B按钮）".to_string());
-                }
-                path.clone()
-            } else {
-                return Err("错误: 无法访问源文件路径".to_string());
-            }
-        } else {
-            return Err("错误: 未初始化源文件路径".to_string());
-        };
+        let base_path_str = get_static_path(
+            &BASE_PATH,
+            "错误: 未设置源文件路径（B按钮）",
+            "错误: 无法访问源文件路径",
+            "错误: 未初始化源文件路径",
+        )?;
 
-        // 验证ANIME_PATH
-        let anime_path_str = if let Some(mutex) = ANIME_PATH.get() {
-            if let Ok(path) = mutex.lock() {
-                if path.is_empty() {
-                    return Err("错误: 未设置目标位置路径（A按钮）".to_string());
-                }
-                path.clone()
-            } else {
-                return Err("错误: 无法访问目标位置路径".to_string());
-            }
-        } else {
-            return Err("错误: 未初始化目标位置路径".to_string());
-        };
+        let anime_path_str = get_static_path(
+            &ANIME_PATH,
+            "错误: 未设置目标位置路径（A按钮）",
+            "错误: 无法访问目标位置路径",
+            "错误: 未初始化目标位置路径",
+        )?;
 
         Ok((base_path_str, anime_path_str))
     }
