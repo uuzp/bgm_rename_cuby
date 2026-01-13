@@ -314,6 +314,10 @@ impl Cuby {
         self.wind.redraw();
     }
 
+    fn set_info(&mut self, message: &str) {
+        self.info_frame.set_label(message);
+    }
+
     fn render_subject_list(&mut self, subjects: &[bangumi_api::Subject]) {
         self.search_browser.clear();
         for subject in subjects {
@@ -379,7 +383,7 @@ impl Cuby {
     fn handle_search_button(&mut self) {
         let query = self.search_input.value();
         if query.is_empty() {
-            self.info_frame.set_label("无关键词");
+            self.set_info("无关键词");
         } else {
             self.handle_search(&query);
         }
@@ -388,9 +392,9 @@ impl Cuby {
     /// 处理浏览器单击事件
     fn handle_browser_click(&mut self, is_file_browser: bool) {
         if is_file_browser {
-            self.info_frame.set_label(&format!("@ {}", self.base_path));
+            self.set_info(&format!("@ {}", self.base_path));
         } else {
-            self.info_frame.set_label(&format!("@ {}", self.anime_path));
+            self.set_info(&format!("@ {}", self.anime_path));
         }
     }    /// 处理搜索逻辑并更新UI
     fn handle_search(&mut self, query: &str) {
@@ -399,17 +403,17 @@ impl Cuby {
                 if subjects.is_empty() {
                     self.search_browser.clear();
                     self.ui_mode = UiMode::Idle;
-                    self.info_frame.set_label(&format!("未找到与\"{}\"相关的番剧", query));
+                    self.set_info(&format!("未找到与\"{}\"相关的番剧", query));
                 } else {
                     self.render_subject_list(&subjects);
                     self.ui_mode = UiMode::SearchResults { subjects };
-                    self.info_frame.set_label(&format!("找到 {} 个搜索结果", self.search_browser.size()));
+                    self.set_info(&format!("找到 {} 个搜索结果", self.search_browser.size()));
                 }
             }
             Err(err_msg) => {
                 self.search_browser.clear();
                 self.ui_mode = UiMode::Idle;
-                self.info_frame.set_label(&format!("搜索失败: {}", err_msg));
+                self.set_info(&format!("搜索失败: {}", err_msg));
             }
         }
     }
@@ -427,7 +431,7 @@ impl Cuby {
         let Some(selected_subject) = subjects.get(idx).cloned() else {
             self.search_browser.clear();
             self.search_browser.add("选择无效或数据不一致");
-            self.info_frame.set_label("选择无效");
+            self.set_info("选择无效");
             return;
         };
 
@@ -435,10 +439,9 @@ impl Cuby {
             Ok(episodes) => {
                 self.render_episode_list(&episodes);
                 if episodes.items.is_empty() {
-                    self.info_frame.set_label("剧集列表为空");
+                    self.set_info("剧集列表为空");
                 } else {
-                    self.info_frame
-                        .set_label(&format!("已加载 {} 集剧集信息", episodes.items.len()));
+                    self.set_info(&format!("已加载 {} 集剧集信息", episodes.items.len()));
                 }
 
                 self.ui_mode = UiMode::EpisodeList {
@@ -448,8 +451,7 @@ impl Cuby {
             }
             Err(err_msg) => {
                 // 保持搜索结果列表不变，允许用户重试
-                self.info_frame
-                    .set_label(&format!("获取剧集信息失败: {}", err_msg));
+                self.set_info(&format!("获取剧集信息失败: {}", err_msg));
             }
         }
     }
@@ -469,8 +471,7 @@ impl Cuby {
 
         let url = format!("https://bgm.tv/subject/{}", subject_id);
         if let Err(e) = open_url(&url) {
-            self.info_frame
-                .set_label(&format!("打开 Bangumi 网页失败: {}", e));
+            self.set_info(&format!("打开 Bangumi 网页失败: {}", e));
         }
     }
 
@@ -479,7 +480,7 @@ impl Cuby {
         let result = self.execute_operation();
         match result {
             Ok(message) => {
-                self.info_frame.set_label(&message);
+                self.set_info(&message);
                 // 只有操作成功时才清空列表
                 self.file_browser.clear();
                 self.search_browser.clear();
@@ -487,7 +488,7 @@ impl Cuby {
             },
             Err(error) => {
                 // 操作失败时，不清空列表，只显示错误信息
-                self.info_frame.set_label(&error);
+                self.set_info(&error);
             },
         }
     }
