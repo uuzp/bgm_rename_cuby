@@ -20,6 +20,35 @@ use windows_sys::Win32::Networking::WinHttp::{
 #[cfg(target_os = "windows")]
 type HINTERNET = *mut core::ffi::c_void;
 
+#[cfg(target_os = "windows")]
+struct WinHttpHandle(HINTERNET);
+
+#[cfg(target_os = "windows")]
+impl WinHttpHandle {
+    fn new(handle: HINTERNET) -> Option<Self> {
+        if handle.is_null() {
+            None
+        } else {
+            Some(Self(handle))
+        }
+    }
+
+    fn get(&self) -> HINTERNET {
+        self.0
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for WinHttpHandle {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                WinHttpCloseHandle(self.0);
+            }
+        }
+    }
+}
+
 #[cfg(not(windows))]
 use native_tls::TlsConnector;
 
@@ -275,139 +304,120 @@ fn winhttp_get_text(
         let method_w = wide_null("GET");
         let user_agent_w = wide_null(user_agent);
 
-        unsafe {
-            let session: HINTERNET = WinHttpOpen(
+        let session = WinHttpHandle::new(unsafe {
+            WinHttpOpen(
                 user_agent_w.as_ptr(),
                 WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                 std::ptr::null(),
                 std::ptr::null(),
                 0,
-            );
-            if session.is_null() {
-                return Err(BangumiError::Network("WinHttpOpen失败".to_string()));
-            }
+            )
+        })
+        .ok_or_else(|| BangumiError::Network("WinHttpOpen失败".to_string()))?;
 
-            let timeout_ms = timeout.as_millis().min(u32::MAX as u128) as i32;
-            let _ = WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms, timeout_ms);
+        let timeout_ms = timeout.as_millis().min(u32::MAX as u128) as i32;
+        let _ = unsafe {
+            WinHttpSetTimeouts(
+                session.get(),
+                timeout_ms,
+                timeout_ms,
+                timeout_ms,
+                timeout_ms,
+            )
+        };
 
-            let connect: HINTERNET = WinHttpConnect(session, host_w.as_ptr(), port, 0);
-            if connect.is_null() {
-                WinHttpCloseHandle(session);
-                return Err(BangumiError::Network("WinHttpConnect失败".to_string()));
-            }
+        let connect = WinHttpHandle::new(unsafe { WinHttpConnect(session.get(), host_w.as_ptr(), port, 0) })
+            .ok_or_else(|| BangumiError::Network("WinHttpConnect失败".to_string()))?;
 
-            let request = WinHttpOpenRequest(
-                connect,
+        let request = WinHttpHandle::new(unsafe {
+            WinHttpOpenRequest(
+                connect.get(),
                 method_w.as_ptr(),
                 path_w.as_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
                 std::ptr::null(),
                 WINHTTP_FLAG_SECURE,
-            );
-            if request.is_null() {
-                WinHttpCloseHandle(connect);
-                WinHttpCloseHandle(session);
-                return Err(BangumiError::Network("WinHttpOpenRequest失败".to_string()));
-            }
+            )
+        })
+        .ok_or_else(|| BangumiError::Network("WinHttpOpenRequest失败".to_string()))?;
 
-            let ok: i32 = WinHttpSendRequest(
-                request,
+        let ok: i32 = unsafe {
+            WinHttpSendRequest(
+                request.get(),
                 std::ptr::null(),
                 0,
                 std::ptr::null_mut(),
                 0,
                 0,
                 0,
-            );
-            if ok == 0 {
-                WinHttpCloseHandle(request);
-                WinHttpCloseHandle(connect);
-                WinHttpCloseHandle(session);
-                return Err(BangumiError::Network("WinHttpSendRequest失败".to_string()));
-            }
-
-            let ok: i32 = WinHttpReceiveResponse(request, std::ptr::null_mut());
-            if ok == 0 {
-                WinHttpCloseHandle(request);
-                WinHttpCloseHandle(connect);
-                WinHttpCloseHandle(session);
-                return Err(BangumiError::Network("WinHttpReceiveResponse失败".to_string()));
-            }
-
-            let status_code = query_status_code(request)
-                .ok_or_else(|| BangumiError::Network("读取HTTP状态码失败".to_string()))?;
-
-            if matches!(status_code, 301 | 302 | 303 | 307 | 308) {
-                if let Some(location) = query_header_string(request, WINHTTP_QUERY_LOCATION) {
-                    let next = resolve_redirect_url(&current, &location);
-                    WinHttpCloseHandle(request);
-                    WinHttpCloseHandle(connect);
-                    WinHttpCloseHandle(session);
-                    current = next;
-                    continue;
-                }
-
-                WinHttpCloseHandle(request);
-                WinHttpCloseHandle(connect);
-                WinHttpCloseHandle(session);
-                return Err(BangumiError::Network("HTTP重定向但缺少Location头".to_string()));
-            }
-
-            if status_code == 404 {
-                WinHttpCloseHandle(request);
-                WinHttpCloseHandle(connect);
-                WinHttpCloseHandle(session);
-                return Err(BangumiError::NotFound);
-            }
-            if status_code == 429 {
-                WinHttpCloseHandle(request);
-                WinHttpCloseHandle(connect);
-                WinHttpCloseHandle(session);
-                return Err(BangumiError::RateLimit);
-            }
-            if status_code != 200 {
-                WinHttpCloseHandle(request);
-                WinHttpCloseHandle(connect);
-                WinHttpCloseHandle(session);
-                return Err(BangumiError::Network(format!("HTTP错误: {}", status_code)));
-            }
-
-            let mut body = Vec::new();
-            loop {
-                let mut available: u32 = 0;
-                let ok: i32 = WinHttpQueryDataAvailable(request, &mut available);
-                if ok == 0 {
-                    WinHttpCloseHandle(request);
-                    WinHttpCloseHandle(connect);
-                    WinHttpCloseHandle(session);
-                    return Err(BangumiError::Network("WinHttpQueryDataAvailable失败".to_string()));
-                }
-                if available == 0 {
-                    break;
-                }
-
-                let mut chunk = vec![0u8; available as usize];
-                let mut read: u32 = 0;
-                let ok: i32 =
-                    WinHttpReadData(request, chunk.as_mut_ptr() as *mut _, available, &mut read);
-                if ok == 0 {
-                    WinHttpCloseHandle(request);
-                    WinHttpCloseHandle(connect);
-                    WinHttpCloseHandle(session);
-                    return Err(BangumiError::Network("WinHttpReadData失败".to_string()));
-                }
-                chunk.truncate(read as usize);
-                body.extend_from_slice(&chunk);
-            }
-
-            WinHttpCloseHandle(request);
-            WinHttpCloseHandle(connect);
-            WinHttpCloseHandle(session);
-
-            return String::from_utf8(body)
-                .map_err(|e| BangumiError::Parse(format!("响应文本编码错误: {}", e)));
+            )
+        };
+        if ok == 0 {
+            return Err(BangumiError::Network("WinHttpSendRequest失败".to_string()));
         }
+
+        let ok: i32 = unsafe { WinHttpReceiveResponse(request.get(), std::ptr::null_mut()) };
+        if ok == 0 {
+            return Err(BangumiError::Network("WinHttpReceiveResponse失败".to_string()));
+        }
+
+        let status_code = unsafe { query_status_code(request.get()) }
+            .ok_or_else(|| BangumiError::Network("读取HTTP状态码失败".to_string()))?;
+
+        if matches!(status_code, 301 | 302 | 303 | 307 | 308) {
+            if let Some(location) = unsafe { query_header_string(request.get(), WINHTTP_QUERY_LOCATION) } {
+                current = resolve_redirect_url(&current, &location);
+                continue;
+            }
+
+            return Err(BangumiError::Network("HTTP重定向但缺少Location头".to_string()));
+        }
+
+        if status_code == 404 {
+            return Err(BangumiError::NotFound);
+        }
+        if status_code == 429 {
+            return Err(BangumiError::RateLimit);
+        }
+        if status_code != 200 {
+            return Err(BangumiError::Network(format!("HTTP错误: {}", status_code)));
+        }
+
+        let mut body = Vec::new();
+        let mut chunk = Vec::new();
+        loop {
+            let mut available: u32 = 0;
+            let ok: i32 = unsafe { WinHttpQueryDataAvailable(request.get(), &mut available) };
+            if ok == 0 {
+                return Err(BangumiError::Network("WinHttpQueryDataAvailable失败".to_string()));
+            }
+            if available == 0 {
+                break;
+            }
+
+            let available_usize = available as usize;
+            if chunk.len() < available_usize {
+                chunk.resize(available_usize, 0);
+            }
+
+            let mut read: u32 = 0;
+            let ok: i32 = unsafe {
+                WinHttpReadData(
+                    request.get(),
+                    chunk.as_mut_ptr() as *mut _,
+                    available,
+                    &mut read,
+                )
+            };
+            if ok == 0 {
+                return Err(BangumiError::Network("WinHttpReadData失败".to_string()));
+            }
+            body.extend_from_slice(&chunk[..read as usize]);
+        }
+
+        return String::from_utf8(body)
+            .map_err(|e| BangumiError::Parse(format!("响应文本编码错误: {}", e)));
     }
 
     Err(BangumiError::Network("重定向次数过多".to_string()))
