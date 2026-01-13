@@ -290,52 +290,45 @@ impl Cuby {
     fn run(mut self) {
         while self.app.wait() {
             if let Some(msg) = self.receiver.recv() {
-                match msg {
-                    Message::Register => {
-                        register_context_menu();
-                    },
-                    Message::Logout => {
-                        unregister_context_menu();
-                    },
-                    Message::About => {
-                        handle_about_menu();
-                    },
-                    Message::Exit => {
-                        self.wind.hide();
-                        break;
-                    },                    
-                    Message::ButtonA => {
-                        self.handle_button_a();
-                    },
-                    Message::ButtonB => {
-                        self.handle_button_b();
-                    },
-                    Message::Search => {
-                        self.handle_search_button();
-                    },
-                    Message::Start => {
-                        self.handle_start_button();
-                    },
-
-                    Message::FileBrowserPush => {
-                        self.handle_browser_click(true);
-                    },
-                    Message::SearchBrowserPush => {
-                        self.handle_browser_click(false);
-                    },
-                    Message::SearchBrowserDoubleClick => {
-                        self.handle_search_results_double_click();
-                        self.info_frame.redraw();
-                        self.wind.redraw();
-                    },
-                    Message::SearchBrowserRightClick => {
-                        self.handle_search_results_right_click();
-                        self.info_frame.redraw();
-                        self.wind.redraw();
-                    },
+                if !self.handle_message(msg) {
+                    break;
                 }
             }
         }
+    }
+
+    fn handle_message(&mut self, msg: Message) -> bool {
+        match msg {
+            Message::Register => register_context_menu(),
+            Message::Logout => unregister_context_menu(),
+            Message::About => handle_about_menu(),
+            Message::Exit => {
+                self.wind.hide();
+                return false;
+            }
+            Message::ButtonA => self.handle_button_a(),
+            Message::ButtonB => self.handle_button_b(),
+            Message::Search => self.handle_search_button(),
+            Message::Start => self.handle_start_button(),
+
+            Message::FileBrowserPush => self.handle_browser_click(true),
+            Message::SearchBrowserPush => self.handle_browser_click(false),
+            Message::SearchBrowserDoubleClick => {
+                self.handle_search_results_double_click();
+                self.redraw_ui();
+            }
+            Message::SearchBrowserRightClick => {
+                self.handle_search_results_right_click();
+                self.redraw_ui();
+            }
+        }
+
+        true
+    }
+
+    fn redraw_ui(&mut self) {
+        self.info_frame.redraw();
+        self.wind.redraw();
     }
 
     /// 处理按钮A点击事件
