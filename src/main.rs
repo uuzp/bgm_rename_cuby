@@ -872,14 +872,8 @@ pub fn extract_anime_name_regex(file_name: &str) -> Option<String> {
 }
 
 /// 注册右键菜单
+#[cfg(target_os = "windows")]
 pub fn register_context_menu(anime_path: &str) {
-    #[cfg(not(target_os = "windows"))]
-    {
-        dialog::message_default("当前平台不支持注册右键菜单");
-        return;
-    }
-
-    #[cfg(target_os = "windows")]
     // 获取当前可执行文件路径
     match env::current_exe() {
         Ok(exe_path_buf) => {
@@ -887,7 +881,7 @@ pub fn register_context_menu(anime_path: &str) {
             let mut errors = Vec::new();
             let key_name = "Add To Cuby";
             let shell_path = "Directory\\shell";
-            
+
             // 创建右键菜单项：-b 使用右键点击的目录；-a 使用用户配置的目标路径
             let command_val = format!("\"{}\" -b \"%1\" -a \"{}\"", exe_path, anime_path);
 
@@ -973,32 +967,33 @@ pub fn register_context_menu(anime_path: &str) {
                     let _ = RegCloseKey(menu_key);
                 }
             }
-            
+
             // 显示结果
             if errors.is_empty() {
                 dialog::message_default("注册表项已成功添加");
             } else {
-                dialog::message_default(&format!("注册表操作时发生错误:\n{}\n\n请确保以管理员身份运行本程序", errors.join("\n")));
+                dialog::message_default(&format!(
+                    "注册表操作时发生错误:\n{}\n\n请确保以管理员身份运行本程序",
+                    errors.join("\n")
+                ));
             }
-        },
+        }
         Err(e) => dialog::message_default(&format!("获取程序路径失败: {}", e)),
     }
 }
 
-/// 注销文件夹右键菜单
-pub fn unregister_context_menu() {
-    #[cfg(not(target_os = "windows"))]
-    {
-        dialog::message_default("当前平台不支持注销右键菜单");
-        return;
-    }
+/// 注册右键菜单（非 Windows 平台）
+#[cfg(not(target_os = "windows"))]
+pub fn register_context_menu(_anime_path: &str) {
+    dialog::message_default("当前平台不支持注册右键菜单");
+}
 
+/// 注销文件夹右键菜单
+#[cfg(target_os = "windows")]
+pub fn unregister_context_menu() {
     let key_name = "Add To Cuby";
     let key_path = format!("Directory\\shell\\{}", key_name);
-    
-    // 尝试删除右键菜单项
 
-    #[cfg(target_os = "windows")]
     unsafe {
         let key_path_w = wide_null(&key_path);
         let status = RegDeleteTreeW(HKEY_CLASSES_ROOT, key_path_w.as_ptr());
@@ -1014,6 +1009,12 @@ pub fn unregister_context_menu() {
             ));
         }
     }
+}
+
+/// 注销文件夹右键菜单（非 Windows 平台）
+#[cfg(not(target_os = "windows"))]
+pub fn unregister_context_menu() {
+    dialog::message_default("当前平台不支持注销右键菜单");
 }
 /// 打开文件夹选择器
 pub fn open_folder_selector(title: &str) -> Option<String> {

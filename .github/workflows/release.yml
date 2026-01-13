@@ -46,7 +46,8 @@ jobs:
           sudo apt-get install -y \
             libx11-dev libxext-dev libxft-dev libxinerama-dev \
             libxcursor-dev libxrender-dev libxfixes-dev \
-            libgl1-mesa-dev
+            libgl1-mesa-dev \
+            libcairo2-dev libglib2.0-dev libpango1.0-dev
 
       - name: Build (release)
         run: cargo build --release
