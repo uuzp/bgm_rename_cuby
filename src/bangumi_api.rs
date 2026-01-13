@@ -1,6 +1,7 @@
 // src/bangumi_api.rs
 
 use miniserde::Deserialize;
+use std::borrow::Cow;
 use std::time::Duration;
 
 #[cfg(not(windows))]
@@ -63,11 +64,11 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 // 优化的错误类型 - 保持简洁但有区分度
 #[derive(Debug)]
 pub enum BangumiError {
-    Network(String),
+    Network(Cow<'static, str>),
     NotFound,
     RateLimit,
-    Parse(String),
-    InvalidInput(String),
+    Parse(Cow<'static, str>),
+    InvalidInput(Cow<'static, str>),
 }
 
 impl std::fmt::Display for BangumiError {
@@ -173,7 +174,7 @@ struct EpisodeResponse {
 fn fetch_json<T: Deserialize>(url: &str) -> Result<T, BangumiError> {
     let response_text = https_get_text(url, DEFAULT_USER_AGENT, REQUEST_TIMEOUT, 5)?;
     miniserde::json::from_str(&response_text)
-        .map_err(|e| BangumiError::Parse(format!("JSON解析失败: {}", e)))
+    .map_err(|e| BangumiError::Parse(format!("JSON解析失败: {}", e).into()))
 }
 
 #[inline(never)]
@@ -203,30 +204,30 @@ fn https_get_text(
         match response.status_code {
             200 => {
                 return String::from_utf8(response.body)
-                    .map_err(|e| BangumiError::Parse(format!("响应文本编码错误: {}", e)));
+                    .map_err(|e| BangumiError::Parse(format!("响应文本编码错误: {}", e).into()));
             }
             301 | 302 | 303 | 307 | 308 => {
                 let Some(location) = response.header("location") else {
-                    return Err(BangumiError::Network("HTTP重定向但缺少Location头".to_string()));
+                    return Err(BangumiError::Network("HTTP重定向但缺少Location头".into()));
                 };
                 current = resolve_redirect_url(&current, location);
                 continue;
             }
             404 => return Err(BangumiError::NotFound),
             429 => return Err(BangumiError::RateLimit),
-            code => return Err(BangumiError::Network(format!("HTTP错误: {}", code))),
+            code => return Err(BangumiError::Network(format!("HTTP错误: {}", code).into())),
         }
     }
 
     #[cfg(not(windows))]
     {
-        Err(BangumiError::Network("重定向次数过多".to_string()))
+        Err(BangumiError::Network("重定向次数过多".into()))
     }
 }
 
 fn parse_https_url(url: &str) -> Result<(String, u16, String), BangumiError> {
     let Some(rest) = url.strip_prefix("https://") else {
-        return Err(BangumiError::InvalidInput("仅支持 https:// URL".to_string()));
+        return Err(BangumiError::InvalidInput("仅支持 https:// URL".into()));
     };
 
     let (host_port, path_part) = match rest.split_once('/') {
@@ -238,14 +239,14 @@ fn parse_https_url(url: &str) -> Result<(String, u16, String), BangumiError> {
         Some((h, p)) => {
             let port: u16 = p
                 .parse()
-                .map_err(|_| BangumiError::InvalidInput("URL端口非法".to_string()))?;
+                .map_err(|_| BangumiError::InvalidInput("URL端口非法".into()))?;
             (h.to_string(), port)
         }
         None => (host_port.to_string(), 443u16),
     };
 
     if host.is_empty() {
-        return Err(BangumiError::InvalidInput("URL主机为空".to_string()));
+        return Err(BangumiError::InvalidInput("URL主机为空".into()));
     }
 
     Ok((host, port, path_part))
@@ -261,19 +262,19 @@ fn https_get_bytes(
 ) -> Result<Vec<u8>, BangumiError> {
     let addr = (host, port);
     let stream = TcpStream::connect(addr)
-        .map_err(|e| BangumiError::Network(format!("连接失败: {}", e)))?;
+        .map_err(|e| BangumiError::Network(format!("连接失败: {}", e).into()))?;
     stream
         .set_read_timeout(Some(timeout))
-        .map_err(|e| BangumiError::Network(format!("设置读取超时失败: {}", e)))?;
+        .map_err(|e| BangumiError::Network(format!("设置读取超时失败: {}", e).into()))?;
     stream
         .set_write_timeout(Some(timeout))
-        .map_err(|e| BangumiError::Network(format!("设置写入超时失败: {}", e)))?;
+        .map_err(|e| BangumiError::Network(format!("设置写入超时失败: {}", e).into()))?;
 
     let connector = TlsConnector::new()
-        .map_err(|e| BangumiError::Network(format!("TLS初始化失败: {}", e)))?;
+        .map_err(|e| BangumiError::Network(format!("TLS初始化失败: {}", e).into()))?;
     let mut tls = connector
         .connect(host, stream)
-        .map_err(|e| BangumiError::Network(format!("TLS握手失败: {}", e)))?;
+        .map_err(|e| BangumiError::Network(format!("TLS握手失败: {}", e).into()))?;
 
     let request = format!(
         "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {ua}\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
@@ -282,11 +283,11 @@ fn https_get_bytes(
         ua = user_agent
     );
     tls.write_all(request.as_bytes())
-        .map_err(|e| BangumiError::Network(format!("写入请求失败: {}", e)))?;
+        .map_err(|e| BangumiError::Network(format!("写入请求失败: {}", e).into()))?;
 
     let mut buf = Vec::new();
     tls.read_to_end(&mut buf)
-        .map_err(|e| BangumiError::Network(format!("读取响应失败: {}", e)))?;
+        .map_err(|e| BangumiError::Network(format!("读取响应失败: {}", e).into()))?;
     Ok(buf)
 }
 
@@ -315,7 +316,7 @@ fn winhttp_get_text(
                 0,
             )
         })
-        .ok_or_else(|| BangumiError::Network("WinHttpOpen失败".to_string()))?;
+        .ok_or_else(|| BangumiError::Network("WinHttpOpen失败".into()))?;
 
         let timeout_ms = timeout.as_millis().min(u32::MAX as u128) as i32;
         let _ = unsafe {
@@ -329,7 +330,7 @@ fn winhttp_get_text(
         };
 
         let connect = WinHttpHandle::new(unsafe { WinHttpConnect(session.get(), host_w.as_ptr(), port, 0) })
-            .ok_or_else(|| BangumiError::Network("WinHttpConnect失败".to_string()))?;
+            .ok_or_else(|| BangumiError::Network("WinHttpConnect失败".into()))?;
 
         let request = WinHttpHandle::new(unsafe {
             WinHttpOpenRequest(
@@ -342,7 +343,7 @@ fn winhttp_get_text(
                 WINHTTP_FLAG_SECURE,
             )
         })
-        .ok_or_else(|| BangumiError::Network("WinHttpOpenRequest失败".to_string()))?;
+        .ok_or_else(|| BangumiError::Network("WinHttpOpenRequest失败".into()))?;
 
         let ok: i32 = unsafe {
             WinHttpSendRequest(
@@ -356,16 +357,16 @@ fn winhttp_get_text(
             )
         };
         if ok == 0 {
-            return Err(BangumiError::Network("WinHttpSendRequest失败".to_string()));
+            return Err(BangumiError::Network("WinHttpSendRequest失败".into()));
         }
 
         let ok: i32 = unsafe { WinHttpReceiveResponse(request.get(), std::ptr::null_mut()) };
         if ok == 0 {
-            return Err(BangumiError::Network("WinHttpReceiveResponse失败".to_string()));
+            return Err(BangumiError::Network("WinHttpReceiveResponse失败".into()));
         }
 
         let status_code = unsafe { query_status_code(request.get()) }
-            .ok_or_else(|| BangumiError::Network("读取HTTP状态码失败".to_string()))?;
+            .ok_or_else(|| BangumiError::Network("读取HTTP状态码失败".into()))?;
 
         if matches!(status_code, 301 | 302 | 303 | 307 | 308) {
             if let Some(location) = unsafe { query_header_string(request.get(), WINHTTP_QUERY_LOCATION) } {
@@ -373,7 +374,7 @@ fn winhttp_get_text(
                 continue;
             }
 
-            return Err(BangumiError::Network("HTTP重定向但缺少Location头".to_string()));
+            return Err(BangumiError::Network("HTTP重定向但缺少Location头".into()));
         }
 
         if status_code == 404 {
@@ -383,7 +384,7 @@ fn winhttp_get_text(
             return Err(BangumiError::RateLimit);
         }
         if status_code != 200 {
-            return Err(BangumiError::Network(format!("HTTP错误: {}", status_code)));
+            return Err(BangumiError::Network(format!("HTTP错误: {}", status_code).into()));
         }
 
         let mut body = Vec::new();
@@ -392,7 +393,7 @@ fn winhttp_get_text(
             let mut available: u32 = 0;
             let ok: i32 = unsafe { WinHttpQueryDataAvailable(request.get(), &mut available) };
             if ok == 0 {
-                return Err(BangumiError::Network("WinHttpQueryDataAvailable失败".to_string()));
+                return Err(BangumiError::Network("WinHttpQueryDataAvailable失败".into()));
             }
             if available == 0 {
                 break;
@@ -413,16 +414,16 @@ fn winhttp_get_text(
                 )
             };
             if ok == 0 {
-                return Err(BangumiError::Network("WinHttpReadData失败".to_string()));
+                return Err(BangumiError::Network("WinHttpReadData失败".into()));
             }
             body.extend_from_slice(&chunk[..read as usize]);
         }
 
         return String::from_utf8(body)
-            .map_err(|e| BangumiError::Parse(format!("响应文本编码错误: {}", e)));
+            .map_err(|e| BangumiError::Parse(format!("响应文本编码错误: {}", e).into()));
     }
 
-    Err(BangumiError::Network("重定向次数过多".to_string()))
+    Err(BangumiError::Network("重定向次数过多".into()))
 }
 
 #[cfg(target_os = "windows")]
@@ -508,25 +509,25 @@ fn parse_http_response(bytes: &[u8]) -> Result<HttpResponse, BangumiError> {
     let header_end = bytes
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| BangumiError::Parse("HTTP响应头不完整".to_string()))?;
+        .ok_or_else(|| BangumiError::Parse("HTTP响应头不完整".into()))?;
     let (header_bytes, body_bytes) = bytes.split_at(header_end + 4);
 
     let header_text = std::str::from_utf8(header_bytes)
-        .map_err(|e| BangumiError::Parse(format!("HTTP头编码错误: {}", e)))?;
+        .map_err(|e| BangumiError::Parse(format!("HTTP头编码错误: {}", e).into()))?;
     let mut lines = header_text.split("\r\n");
     let status_line = lines
         .next()
-        .ok_or_else(|| BangumiError::Parse("HTTP状态行缺失".to_string()))?;
+        .ok_or_else(|| BangumiError::Parse("HTTP状态行缺失".into()))?;
     let mut status_parts = status_line.split_whitespace();
     let _http_version = status_parts
         .next()
-        .ok_or_else(|| BangumiError::Parse("HTTP版本缺失".to_string()))?;
+        .ok_or_else(|| BangumiError::Parse("HTTP版本缺失".into()))?;
     let code_str = status_parts
         .next()
-        .ok_or_else(|| BangumiError::Parse("HTTP状态码缺失".to_string()))?;
+        .ok_or_else(|| BangumiError::Parse("HTTP状态码缺失".into()))?;
     let status_code: u16 = code_str
         .parse()
-        .map_err(|_| BangumiError::Parse("HTTP状态码非法".to_string()))?;
+        .map_err(|_| BangumiError::Parse("HTTP状态码非法".into()))?;
 
     let mut headers = Vec::new();
     for line in lines {
@@ -574,22 +575,22 @@ fn decode_chunked(mut input: &[u8]) -> Result<Vec<u8>, BangumiError> {
         let line_end = input
             .windows(2)
             .position(|w| w == b"\r\n")
-            .ok_or_else(|| BangumiError::Parse("chunked长度行不完整".to_string()))?;
+            .ok_or_else(|| BangumiError::Parse("chunked长度行不完整".into()))?;
         let (size_line, rest) = input.split_at(line_end);
         let rest = &rest[2..];
 
         let size_str = std::str::from_utf8(size_line)
-            .map_err(|e| BangumiError::Parse(format!("chunked长度编码错误: {}", e)))?;
+            .map_err(|e| BangumiError::Parse(format!("chunked长度编码错误: {}", e).into()))?;
         let size_str = size_str.split(';').next().unwrap_or("").trim();
         let size = usize::from_str_radix(size_str, 16)
-            .map_err(|_| BangumiError::Parse("chunked长度非法".to_string()))?;
+            .map_err(|_| BangumiError::Parse("chunked长度非法".into()))?;
 
         if size == 0 {
             break;
         }
 
         if rest.len() < size + 2 {
-            return Err(BangumiError::Parse("chunked数据不完整".to_string()));
+            return Err(BangumiError::Parse("chunked数据不完整".into()));
         }
 
         out.extend_from_slice(&rest[..size]);
@@ -644,10 +645,10 @@ fn percent_encode_path_segment(input: &str) -> String {
 pub fn search_subjects(keywords: &str) -> Result<Vec<Subject>, BangumiError> {
     let trimmed = keywords.trim();
     if trimmed.is_empty() {
-        return Err(BangumiError::InvalidInput("搜索关键词不能为空".to_string()));
+        return Err(BangumiError::InvalidInput("搜索关键词不能为空".into()));
     }
     if trimmed.len() > 100 {
-        return Err(BangumiError::InvalidInput("搜索关键词过长".to_string()));
+        return Err(BangumiError::InvalidInput("搜索关键词过长".into()));
     }
     
     let encoded_keywords = percent_encode_path_segment(trimmed);
