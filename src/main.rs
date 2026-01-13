@@ -279,6 +279,12 @@ impl Cuby {
                             // 拖拽事件已处理
                         }
                         // 搜索浏览器事件
+                        (false, Event::Push) if app::event_button() == 3 => {
+                            // 右键：在番剧列表中打开 Bangumi 网页
+                            self.handle_search_results_right_click();
+                            self.info_frame.redraw();
+                            self.wind.redraw();
+                        }
                         (false, Event::Push) if app::event_clicks() => {
                             // 双击事件
                             self.handle_search_results_double_click();
@@ -457,6 +463,34 @@ impl Cuby {
                 *self.selected_anime_id.borrow_mut() = None;
                 self.info_frame.set_label("选择无效");
             }
+        }
+    }
+
+    /// 处理搜索结果右键事件：打开 Bangumi 番剧网页
+    fn handle_search_results_right_click(&mut self) {
+        // 仅在“番剧搜索结果列表”状态下生效；剧集列表右键不处理
+        if self.episode_list.borrow().is_some() {
+            return;
+        }
+
+        let line = self.search_browser.value();
+        if line <= 0 || line > self.search_browser.size() {
+            return;
+        }
+
+        let subject_id_opt = self.search_results.borrow().as_ref().and_then(|subjects| {
+            let idx = (line as usize) - 1;
+            subjects.get(idx).map(|subject| subject.id)
+        });
+
+        let Some(subject_id) = subject_id_opt else {
+            return;
+        };
+
+        let url = format!("https://bgm.tv/subject/{}", subject_id);
+        if let Err(e) = open_url(&url) {
+            self.info_frame
+                .set_label(&format!("打开 Bangumi 网页失败: {}", e));
         }
     }
 
