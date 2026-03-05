@@ -19,7 +19,7 @@ use std::process::Command;
 // Some bundled FLTK builds reference GDI+ symbols; ensure we link the import lib.
 #[cfg(target_os = "windows")]
 #[link(name = "gdiplus")]
-extern "system" {}
+unsafe extern "system" {}
 
 // 引入模块
 mod bangumi_api;

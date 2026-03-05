@@ -443,14 +443,16 @@ fn wide_null(s: &str) -> Vec<u16> {
 unsafe fn query_status_code(request: HINTERNET) -> Option<u32> {
     let mut status: u32 = 0;
     let mut len: u32 = std::mem::size_of::<u32>() as u32;
-    let ok: i32 = WinHttpQueryHeaders(
-        request,
-        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-        std::ptr::null(),
-        &mut status as *mut _ as *mut _,
-        &mut len,
-        std::ptr::null_mut(),
-    );
+    let ok: i32 = unsafe {
+        WinHttpQueryHeaders(
+            request,
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            std::ptr::null(),
+            &mut status as *mut _ as *mut _,
+            &mut len,
+            std::ptr::null_mut(),
+        )
+    };
     if ok == 0 {
         None
     } else {
@@ -461,14 +463,16 @@ unsafe fn query_status_code(request: HINTERNET) -> Option<u32> {
 #[cfg(target_os = "windows")]
 unsafe fn query_header_string(request: HINTERNET, query: u32) -> Option<String> {
     let mut len: u32 = 0;
-    let ok: i32 = WinHttpQueryHeaders(
-        request,
-        query,
-        std::ptr::null(),
-        std::ptr::null_mut(),
-        &mut len,
-        std::ptr::null_mut(),
-    );
+    let ok: i32 = unsafe {
+        WinHttpQueryHeaders(
+            request,
+            query,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            &mut len,
+            std::ptr::null_mut(),
+        )
+    };
     if ok != 0 {
         return None;
     }
@@ -477,14 +481,16 @@ unsafe fn query_header_string(request: HINTERNET, query: u32) -> Option<String> 
     }
 
     let mut buf: Vec<u16> = vec![0u16; (len as usize + 1) / 2];
-    let ok: i32 = WinHttpQueryHeaders(
-        request,
-        query,
-        std::ptr::null(),
-        buf.as_mut_ptr() as *mut _,
-        &mut len,
-        std::ptr::null_mut(),
-    );
+    let ok: i32 = unsafe {
+        WinHttpQueryHeaders(
+            request,
+            query,
+            std::ptr::null(),
+            buf.as_mut_ptr() as *mut _,
+            &mut len,
+            std::ptr::null_mut(),
+        )
+    };
     if ok == 0 {
         return None;
     }
