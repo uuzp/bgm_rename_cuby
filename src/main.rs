@@ -7,7 +7,7 @@ use fltk::{
     button::Button,
     enums,
     frame::Frame,
-    group::{Flex, Tabs},
+    group::{Flex, Group},
     input::Input,
     misc::Progress,
     menu::MenuButton,
@@ -96,6 +96,8 @@ enum Message {
     ButtonB,
     Search,
     Start,
+    ShowListPage,
+    ShowTaskPage,
 
     FileBrowserPush,
     SearchBrowserPush,
@@ -145,6 +147,10 @@ struct Cuby {
     sender: app::Sender<Message>,
     task_sender: std::sync::mpsc::Sender<TaskRequest>,
     wind: Window,
+    list_nav_btn: Button,
+    task_nav_btn: Button,
+    list_page: Flex,
+    task_page: Flex,
     file_browser: HoldBrowser,
     search_browser: HoldBrowser,
     task_browser: HoldBrowser,
@@ -170,6 +176,13 @@ struct Cuby {
     current_task_id: Option<u64>,
     focused_task_id: Option<u64>,
     cancelled_task_ids: Arc<Mutex<HashSet<u64>>>,
+    active_page: PageKind,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum PageKind {
+    List,
+    Task,
 }
 
 #[derive(Clone)]
@@ -536,10 +549,27 @@ impl Cuby {
             .with_size(1200, 600)
             .with_label("BGM Rename Cuby");
 
-        let mut tabs = Tabs::default_fill();
-        tabs.set_tab_align(enums::Align::Left);
+        let mut shell = Flex::default_fill().row();
+        shell.set_margin(0);
+        shell.set_pad(0);
 
-        let mut list_page = Flex::default_fill().column().with_label("列\n表");
+        let mut nav_col = Flex::default().column();
+        nav_col.set_margin(6);
+        nav_col.set_pad(8);
+
+        let mut list_nav_btn = Button::default().with_label("列\n表");
+        list_nav_btn.emit(sender.clone(), Message::ShowListPage);
+        let mut task_nav_btn = Button::default().with_label("任\n务");
+        task_nav_btn.emit(sender.clone(), Message::ShowTaskPage);
+        nav_col.fixed(&list_nav_btn, 92);
+        nav_col.fixed(&task_nav_btn, 92);
+        nav_col.end();
+
+        let content_group = Group::default_fill();
+
+        let mut list_page = Flex::default_fill().column();
+        list_page.set_margin(8);
+        list_page.set_pad(8);
 
         // 上区域：菜单按钮、按钮B、按钮A、搜索框和搜索按钮
         let mut top_flex = Flex::default().row();
@@ -638,11 +668,11 @@ impl Cuby {
         bottom_flex.fixed(&right_margin, 5);
         bottom_flex.end();
 
-        list_page.fixed(&mid_flex, 1);
+        list_page.fixed(&top_flex, 30);
         list_page.fixed(&bottom_flex, 30);
         list_page.end();
 
-        let mut task_page = Flex::default_fill().column().with_label("任\n务");
+        let mut task_page = Flex::default_fill().column();
         task_page.set_margin(12);
         task_page.set_pad(10);
 
@@ -711,9 +741,16 @@ impl Cuby {
         task_page.fixed(&task_detail_frame, 78);
         task_page.end();
 
-        tabs.end();
-        tabs.auto_layout();
-        wind.resizable(&tabs);
+        task_page.hide();
+        list_nav_btn.set_color(enums::Color::from_hex_str("#D8F0FF").unwrap());
+        task_nav_btn.set_color(enums::Color::from_hex_str("#EAEAEA").unwrap());
+
+        content_group.end();
+
+        shell.fixed(&nav_col, 64);
+        shell.end();
+
+        wind.resizable(&shell);
         wind.end();        
         wind.show();
         
@@ -739,6 +776,10 @@ impl Cuby {
             sender,
             task_sender,
             wind,
+            list_nav_btn,
+            task_nav_btn,
+            list_page,
+            task_page,
             file_browser,
             search_browser,
             task_browser,
@@ -762,6 +803,7 @@ impl Cuby {
             current_task_id: None,
             focused_task_id: None,
             cancelled_task_ids,
+            active_page: PageKind::List,
         }
     }
 
@@ -807,6 +849,14 @@ impl Cuby {
             }
             Message::Start => {
                 self.handle_start_button();
+                true
+            }
+            Message::ShowListPage => {
+                self.active_page = PageKind::List;
+                true
+            }
+            Message::ShowTaskPage => {
+                self.active_page = PageKind::Task;
                 true
             }
             Message::FileBrowserPush => {
@@ -883,7 +933,12 @@ impl Cuby {
     }
 
     fn redraw_ui(&mut self) {
+        self.sync_page_visibility();
         self.render_task_panel();
+        self.list_nav_btn.redraw();
+        self.task_nav_btn.redraw();
+        self.list_page.redraw();
+        self.task_page.redraw();
         self.task_browser.redraw();
         self.task_context_menu.redraw();
         self.task_progress.redraw();
@@ -893,6 +948,23 @@ impl Cuby {
         self.task_detail_frame.redraw();
         self.info_frame.redraw();
         self.wind.redraw();
+    }
+
+    fn sync_page_visibility(&mut self) {
+        match self.active_page {
+            PageKind::List => {
+                self.list_page.show();
+                self.task_page.hide();
+                self.list_nav_btn.set_color(enums::Color::from_hex_str("#D8F0FF").unwrap());
+                self.task_nav_btn.set_color(enums::Color::from_hex_str("#EAEAEA").unwrap());
+            }
+            PageKind::Task => {
+                self.list_page.hide();
+                self.task_page.show();
+                self.list_nav_btn.set_color(enums::Color::from_hex_str("#EAEAEA").unwrap());
+                self.task_nav_btn.set_color(enums::Color::from_hex_str("#D8F0FF").unwrap());
+            }
+        }
     }
 
     fn render_task_panel(&mut self) {
