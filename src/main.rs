@@ -100,6 +100,7 @@ enum Message {
     FileBrowserPush,
     SearchBrowserPush,
     TaskBrowserPush,
+    TaskBrowserRightClick { x: i32, y: i32 },
     SearchBrowserDoubleClick,
     SearchBrowserRightClick,
     OpenTaskFolder,
@@ -147,6 +148,7 @@ struct Cuby {
     file_browser: HoldBrowser,
     search_browser: HoldBrowser,
     task_browser: HoldBrowser,
+    task_context_menu: MenuButton,
     task_progress: Progress,
     task_status_frame: Frame,
     task_open_folder_btn: Button,
@@ -656,12 +658,25 @@ impl Cuby {
             let sender_task = sender.clone();
             task_browser.handle(move |_browser, event| match event {
                 Event::Push => {
-                    sender_task.send(Message::TaskBrowserPush);
+                    if app::event_button() == 3 {
+                        sender_task.send(Message::TaskBrowserRightClick {
+                            x: app::event_x_root(),
+                            y: app::event_y_root(),
+                        });
+                    } else {
+                        sender_task.send(Message::TaskBrowserPush);
+                    }
                     true
                 }
                 _ => false,
             });
         }
+
+        let mut task_context_menu = MenuButton::new(0, 0, 1, 1, None);
+        task_context_menu.add_choice("打开目录");
+        task_context_menu.add_choice("移除");
+        task_context_menu.add_choice("重试");
+        task_context_menu.hide();
 
         let mut task_progress = Progress::default();
         task_progress.set_minimum(0.0);
@@ -727,6 +742,7 @@ impl Cuby {
             file_browser,
             search_browser,
             task_browser,
+            task_context_menu,
             task_progress,
             task_status_frame,
             task_open_folder_btn,
@@ -805,6 +821,10 @@ impl Cuby {
                 self.handle_task_browser_push();
                 true
             }
+            Message::TaskBrowserRightClick { x, y } => {
+                self.handle_task_browser_right_click(x, y);
+                true
+            }
             Message::SearchBrowserDoubleClick => {
                 self.handle_search_results_double_click();
                 true
@@ -865,6 +885,7 @@ impl Cuby {
     fn redraw_ui(&mut self) {
         self.render_task_panel();
         self.task_browser.redraw();
+        self.task_context_menu.redraw();
         self.task_progress.redraw();
         self.task_status_frame.redraw();
         self.task_remove_btn.redraw();
@@ -973,6 +994,32 @@ impl Cuby {
         if let Some(task) = self.tasks.get(index) {
             self.focused_task_id = Some(task.id);
             self.set_info(&format!("已选择任务 #{}: {}", task.id, task.title));
+        }
+    }
+
+    fn handle_task_browser_right_click(&mut self, x: i32, y: i32) {
+        let Some(index) = self.selected_task_index() else {
+            return;
+        };
+
+        if let Some(task) = self.tasks.get(index) {
+            self.focused_task_id = Some(task.id);
+        }
+
+        self.task_context_menu.resize(x, y, 1, 1);
+        let Some(item) = self.task_context_menu.popup() else {
+            return;
+        };
+
+        let Some(choice) = item.label() else {
+            return;
+        };
+
+        match choice.as_str() {
+            "打开目录" => self.handle_open_task_folder(),
+            "移除" => self.handle_remove_queued_task(),
+            "重试" => self.handle_retry_task(),
+            _ => {}
         }
     }
 
