@@ -107,6 +107,20 @@ enum Message {
         subject: bangumi_api::Subject,
         result: Result<bangumi_api::Episodes, String>,
     },
+    TaskStarted {
+        task_id: u64,
+        total_files: usize,
+    },
+    TaskProgress {
+        task_id: u64,
+        completed_files: usize,
+        total_files: usize,
+        current_file: String,
+    },
+    TaskFinished {
+        task_id: u64,
+        result: Result<FileOperationReport, String>,
+    },
 }
 
 #[derive(Clone)]
@@ -122,6 +136,7 @@ enum UiMode {
 struct Cuby {
     app: app::App,
     sender: app::Sender<Message>,
+    task_sender: std::sync::mpsc::Sender<TaskRequest>,
     wind: Window,
     file_browser: HoldBrowser,
     search_browser: HoldBrowser,
@@ -139,8 +154,13 @@ struct Cuby {
     ui_mode: UiMode,
     pending_search_query: Option<String>,
     pending_episode_subject_id: Option<u64>,
+    tasks: Vec<TaskListEntry>,
+    next_task_id: u64,
+    current_task_id: Option<u64>,
+    focused_task_id: Option<u64>,
 }
 
+#[derive(Clone)]
 struct FileOperationReport {
     successful_links: usize,
     failed_links: usize,
@@ -152,6 +172,49 @@ struct FileOperationReport {
     cancelled: bool,
     cancel_message: Option<String>,
     transfer_mode: VideoTransferMode,
+}
+
+#[derive(Clone)]
+struct TaskRequest {
+    id: u64,
+    title: String,
+    base_path: String,
+    anime_path: String,
+    subject: bangumi_api::Subject,
+    episodes: bangumi_api::Episodes,
+    source_files: Vec<String>,
+    transfer_mode: VideoTransferMode,
+}
+
+#[derive(Clone)]
+struct TaskListEntry {
+    id: u64,
+    title: String,
+    status: TaskStatus,
+    completed_files: usize,
+    total_files: usize,
+    detail: String,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum TaskStatus {
+    Queued,
+    Running,
+    Completed,
+    Partial,
+    Failed,
+}
+
+impl TaskStatus {
+    fn label(self) -> &'static str {
+        match self {
+            TaskStatus::Queued => "等待中",
+            TaskStatus::Running => "进行中",
+            TaskStatus::Completed => "已完成",
+            TaskStatus::Partial => "部分完成",
+            TaskStatus::Failed => "失败",
+        }
+    }
 }
 
 impl FileOperationReport {
@@ -222,12 +285,6 @@ impl FileOperationReport {
     }
 }
 
-enum OperationOutcome {
-    Success(String),
-    Partial(FileOperationReport),
-    Cancelled(String),
-}
-
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum VideoTransferMode {
     HardLink,
@@ -250,11 +307,205 @@ impl VideoTransferMode {
     }
 }
 
+fn build_target_directory_path(
+    anime_path_root_str: &str,
+    anime_display_name: &str,
+    year: &str,
+) -> std::path::PathBuf {
+    let cleaned_anime_name_for_folder = clean_filename(anime_display_name);
+    let target_anime_folder_name = format!("{}({})", cleaned_anime_name_for_folder, year);
+    std::path::Path::new(anime_path_root_str).join(target_anime_folder_name)
+}
+
+fn prepare_target_directory(
+    anime_path_root_str: &str,
+    anime_display_name: &str,
+    year: &str,
+) -> Result<std::path::PathBuf, String> {
+    let target_anime_dir = build_target_directory_path(anime_path_root_str, anime_display_name, year);
+    std::fs::create_dir_all(&target_anime_dir)
+        .map_err(|e| format!("错误: 创建目标文件夹失败: {}", e))?;
+    Ok(target_anime_dir)
+}
+
+fn run_task_request<F>(task: &TaskRequest, mut on_progress: F) -> Result<FileOperationReport, String>
+where
+    F: FnMut(usize, usize, &str),
+{
+    let year = task.episodes.year.to_string();
+    let anime_display_name = task.subject.display_name().to_string();
+    let target_anime_dir = prepare_target_directory(&task.anime_path, &anime_display_name, &year)?;
+
+    let formatted_episode_names = task.episodes.formatted_names();
+    let mut report = FileOperationReport::new();
+    report.transfer_mode = task.transfer_mode;
+
+    let total_files = task.source_files.len();
+    for (index, source_file_name_str) in task.source_files.iter().enumerate() {
+        if index >= formatted_episode_names.len() {
+            report.skipped_files += 1;
+            report
+                .details
+                .push(format!("跳过文件 '{}': 超出剧集范围", source_file_name_str));
+            on_progress(index + 1, total_files, source_file_name_str);
+            continue;
+        }
+
+        let source_file_path = std::path::Path::new(&task.base_path).join(source_file_name_str);
+        let original_extension = source_file_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        let cleaned_episode_name_part = clean_filename(&formatted_episode_names[index]);
+        let new_file_name_str = if original_extension.is_empty() {
+            cleaned_episode_name_part.clone()
+        } else {
+            format!("{}.{}", cleaned_episode_name_part, original_extension)
+        };
+
+        let target_file_path = target_anime_dir.join(&new_file_name_str);
+
+        if source_file_path == target_file_path {
+            report.skipped_files += 1;
+            report
+                .details
+                .push(format!("跳过文件 '{}': 源与目标相同", source_file_name_str));
+            on_progress(index + 1, total_files, source_file_name_str);
+            continue;
+        }
+        if target_file_path.exists() {
+            report.skipped_files += 1;
+            report
+                .details
+                .push(format!("跳过文件 '{}': 目标已存在", source_file_name_str));
+            on_progress(index + 1, total_files, source_file_name_str);
+            continue;
+        }
+
+        match copy_or_link_file(&source_file_path, &target_file_path, task.transfer_mode) {
+            Ok(_) => {
+                report.successful_links += 1;
+                copy_matching_subtitles(
+                    &mut report,
+                    source_file_name_str,
+                    &task.base_path,
+                    &cleaned_episode_name_part,
+                    &target_anime_dir,
+                );
+            }
+            Err(e) => {
+                report.failed_links += 1;
+                if task.transfer_mode == VideoTransferMode::HardLink && is_cross_device_link_error(&e)
+                {
+                    report.details.push(format!(
+                        "失败: '{}', 检测到跨盘硬链接错误，请重新创建任务并选择复制模式",
+                        source_file_name_str
+                    ));
+                } else {
+                    report
+                        .details
+                        .push(format!("失败: '{}', 错误: {}", source_file_name_str, e));
+                }
+            }
+        }
+
+        on_progress(index + 1, total_files, source_file_name_str);
+    }
+
+    Ok(report)
+}
+
+fn copy_matching_subtitles(
+    report: &mut FileOperationReport,
+    source_file_name_str: &str,
+    base_path_str: &str,
+    cleaned_episode_name_part: &str,
+    target_anime_dir: &std::path::Path,
+) {
+    let subtitle_files = find_matching_subtitle_files(source_file_name_str, base_path_str);
+    for (subtitle_file_name, subtitle_ext) in subtitle_files {
+        let source_subtitle_path = std::path::Path::new(base_path_str).join(&subtitle_file_name);
+
+        let subtitle_new_name = if subtitle_file_name.starts_with(&format!(
+            "{}.",
+            source_file_name_str
+                .rsplit_once('.')
+                .map(|(base, _)| base)
+                .unwrap_or(source_file_name_str)
+        )) {
+            let video_base = source_file_name_str
+                .rsplit_once('.')
+                .map(|(base, _)| base)
+                .unwrap_or(source_file_name_str);
+            let subtitle_base = subtitle_file_name
+                .rsplit_once('.')
+                .map(|(base, _)| base)
+                .unwrap_or(&subtitle_file_name);
+            let language_part = &subtitle_base[video_base.len()..];
+            format!("{}{}.{}", cleaned_episode_name_part, language_part, subtitle_ext)
+        } else {
+            format!("{}.{}", cleaned_episode_name_part, subtitle_ext)
+        };
+
+        let target_subtitle_path = target_anime_dir.join(&subtitle_new_name);
+        if !target_subtitle_path.exists() {
+            match std::fs::copy(&source_subtitle_path, &target_subtitle_path) {
+                Ok(_) => {
+                    report.subtitle_copied += 1;
+                }
+                Err(e) => {
+                    report.subtitle_failed += 1;
+                    report.details.push(format!(
+                        "字幕文件复制失败: '{}', 错误: {}",
+                        subtitle_file_name, e
+                    ));
+                }
+            }
+        } else {
+            report.subtitle_skipped += 1;
+            report
+                .details
+                .push(format!("跳过字幕文件 '{}': 目标已存在", subtitle_file_name));
+        }
+    }
+}
+
+fn spawn_task_worker(
+    receiver: std::sync::mpsc::Receiver<TaskRequest>,
+    sender: app::Sender<Message>,
+) {
+    std::thread::spawn(move || {
+        while let Ok(task) = receiver.recv() {
+            let total_files = task.source_files.len();
+            sender.send(Message::TaskStarted {
+                task_id: task.id,
+                total_files,
+            });
+
+            let result = run_task_request(&task, |completed_files, total_files, current_file| {
+                sender.send(Message::TaskProgress {
+                    task_id: task.id,
+                    completed_files,
+                    total_files,
+                    current_file: current_file.to_string(),
+                });
+            });
+
+            sender.send(Message::TaskFinished {
+                task_id: task.id,
+                result,
+            });
+        }
+    });
+}
+
 impl Cuby {
     fn new(cli_args: &CliArgs) -> Self {
         // 创建应用和窗口
         let app = app::App::default();
         let (sender, receiver) = app::channel::<Message>();
+        let (task_sender, task_receiver) = std::sync::mpsc::channel::<TaskRequest>();
+        spawn_task_worker(task_receiver, sender.clone());
         let mut wind = Window::default()
             .with_size(1200, 600)
             .with_label("BGM Rename Cuby");
@@ -423,6 +674,7 @@ impl Cuby {
         Self {
             app,
             sender,
+            task_sender,
             wind,
             file_browser,
             search_browser,
@@ -438,6 +690,10 @@ impl Cuby {
             ui_mode: UiMode::Idle,
             pending_search_query: None,
             pending_episode_subject_id: None,
+            tasks: Vec::new(),
+            next_task_id: 1,
+            current_task_id: None,
+            focused_task_id: None,
         }
     }
 
@@ -509,6 +765,26 @@ impl Cuby {
                 self.handle_episodes_completed(subject, result);
                 true
             }
+            Message::TaskStarted {
+                task_id,
+                total_files,
+            } => {
+                self.handle_task_started(task_id, total_files);
+                true
+            }
+            Message::TaskProgress {
+                task_id,
+                completed_files,
+                total_files,
+                current_file,
+            } => {
+                self.handle_task_progress(task_id, completed_files, total_files, &current_file);
+                true
+            }
+            Message::TaskFinished { task_id, result } => {
+                self.handle_task_finished(task_id, result);
+                true
+            }
         };
 
         if should_continue {
@@ -519,12 +795,71 @@ impl Cuby {
     }
 
     fn redraw_ui(&mut self) {
+        self.render_task_panel();
         self.task_browser.redraw();
         self.task_progress.redraw();
         self.task_status_frame.redraw();
         self.task_detail_frame.redraw();
         self.info_frame.redraw();
         self.wind.redraw();
+    }
+
+    fn render_task_panel(&mut self) {
+        self.task_browser.clear();
+        if self.tasks.is_empty() {
+            self.task_browser.add("当前还没有排队任务");
+        } else {
+            for task in &self.tasks {
+                let progress = if task.total_files == 0 {
+                    "0/0".to_string()
+                } else {
+                    format!("{}/{}", task.completed_files, task.total_files)
+                };
+                self.task_browser.add(&format!(
+                    "#{:02} [{}] {} ({})",
+                    task.id,
+                    task.status.label(),
+                    task.title,
+                    progress
+                ));
+            }
+        }
+
+        let display_task = self
+            .focused_task_id
+            .and_then(|task_id| self.tasks.iter().find(|task| task.id == task_id))
+            .or_else(|| {
+                self.current_task_id
+                    .and_then(|task_id| self.tasks.iter().find(|task| task.id == task_id))
+            })
+            .or_else(|| self.tasks.last());
+
+        if let Some(task) = display_task {
+            let total = task.total_files.max(1);
+            let percent = if task.total_files == 0 {
+                0.0
+            } else {
+                (task.completed_files as f64 / total as f64) * 100.0
+            };
+            self.task_progress.set_value(percent);
+            self.task_progress.set_label(&format!("{percent:.0}%"));
+            self.task_status_frame
+                .set_label(&format!("状态：{}", task.status.label()));
+            self.task_detail_frame.set_label(&format!(
+                "任务：{}\n进度：{}/{}\n说明：{}",
+                task.title,
+                task.completed_files,
+                task.total_files,
+                task.detail
+            ));
+        } else {
+            self.task_progress.set_value(0.0);
+            self.task_progress.set_label("0%");
+            self.task_status_frame.set_label("状态：空闲");
+            self.task_detail_frame.set_label(
+                "当前任务：暂无\n进度：等待接入后台队列\n说明：这一页会承接后续的任务列表、进度条和结果摘要。",
+            );
+        }
     }
 
     fn set_info(&mut self, message: &str) {
@@ -534,14 +869,6 @@ impl Cuby {
     fn reset_search_ui(&mut self) {
         self.search_browser.clear();
         self.ui_mode = UiMode::Idle;
-    }
-
-    fn on_operation_success(&mut self, message: &str) {
-        self.set_info(message);
-        self.base_path.clear();
-        self.file_browser.clear();
-        self.search_input.set_value("");
-        self.reset_search_ui();
     }
 
     fn handle_register_menu(&mut self) {
@@ -769,234 +1096,151 @@ impl Cuby {
 
     /// 处理完成按钮逻辑（简化版）
     fn handle_start_button(&mut self) {
-        let result = self.execute_operation();
-        match result {
-            Ok(OperationOutcome::Success(message)) => {
-                self.on_operation_success(&message);
-            }
-            Ok(OperationOutcome::Partial(report)) => {
-                let summary = report.summary();
-                self.set_info(&summary);
-                if let Some(detail_message) = report.detail_message() {
-                    dialog::message_default(&detail_message);
+        match self.build_task_request() {
+            Ok(task) => {
+                let task_title = task.title.clone();
+                if let Err(error) = self.enqueue_task(task) {
+                    self.set_info(&error);
+                    return;
                 }
-            }
-            Ok(OperationOutcome::Cancelled(message)) => {
-                self.set_info(&message);
+                self.set_info(&format!("已加入任务队列: {}", task_title));
             }
             Err(error) => {
-                // 操作失败时，不清空列表，只显示错误信息
                 self.set_info(&error);
             }
         }
     }
 
-    /// 执行完整操作流程
-    fn execute_operation(&mut self) -> Result<OperationOutcome, String> {
-        // 统一验证
+    fn build_task_request(&mut self) -> Result<TaskRequest, String> {
         let (base_path_str, anime_path_str) = self.is_check()?;
-
-        // 收集源文件
         let source_files = collect_source_files_from_browser(&self.file_browser);
+        if source_files.is_empty() {
+            return Err("错误: 当前源目录中没有可处理的视频文件".to_string());
+        }
 
         let UiMode::EpisodeList { subject, episodes } = &self.ui_mode else {
             return Err("错误: 请先搜索并选择番剧".to_string());
         };
 
+        if source_files.len() > episodes.items.len() {
+            let msg = format!(
+                "警告: 选择的文件数量 ({}) 多于剧集数量 ({}). 是否继续加入队列?",
+                source_files.len(),
+                episodes.items.len()
+            );
+            if dialog::choice2_default(&msg, "继续", "取消", "") != Some(0) {
+                return Err("已取消：文件数量多于剧集数量".to_string());
+            }
+        }
+
         let year = episodes.year.to_string();
         let anime_display_name = subject.display_name().to_string();
 
-        // 创建目标目录
-        let target_anime_dir = self.prepare_target_directory(&anime_path_str, &anime_display_name, &year)?;
+        let target_anime_dir = build_target_directory_path(&anime_path_str, &anime_display_name, &year);
         let transfer_mode = self.choose_video_transfer_mode(&base_path_str, &target_anime_dir)?;
 
-        // 执行操作
-        let report = self.execute_file_operations(
-            &source_files,
-            &base_path_str,
-            episodes,
-            &target_anime_dir,
-            transfer_mode,
-        );
+        let task_id = self.next_task_id;
+        self.next_task_id += 1;
 
-        if report.cancelled {
-            return Ok(OperationOutcome::Cancelled(report.summary()));
-        }
-
-        if report.is_clean_success() {
-            Ok(OperationOutcome::Success(report.summary()))
-        } else {
-            Ok(OperationOutcome::Partial(report))
-        }
-    }
-
-    /// 统一验证：路径是否已设置
-    fn is_check(&self) -> Result<(String, String), String> {
-        if self.base_path.is_empty() {
-            return Err("错误: 未设置源文件路径（B按钮）".to_string());
-        }
-        if self.anime_path.is_empty() {
-            return Err("错误: 未设置目标位置路径（A按钮）".to_string());
-        }
-
-        let base_path_str = self.base_path.clone();
-        let anime_path_str = self.anime_path.clone();
-
-        Ok((base_path_str, anime_path_str))
-    }
-
-    /// 执行文件操作
-    fn execute_file_operations(
-        &self,
-        source_files: &[String],
-        base_path_str: &str,
-        episodes: &bangumi_api::Episodes,
-        target_anime_dir: &std::path::Path,
-        transfer_mode: VideoTransferMode,
-    ) -> FileOperationReport {
-        let formatted_episode_names = episodes.formatted_names();
-        self.execute_file_renaming(
+        Ok(TaskRequest {
+            id: task_id,
+            title: format!("{} ({})", anime_display_name, year),
+            base_path: base_path_str,
+            anime_path: anime_path_str,
+            subject: subject.clone(),
+            episodes: episodes.clone(),
             source_files,
-            base_path_str,
-            &formatted_episode_names,
-            target_anime_dir,
             transfer_mode,
-        )
+        })
     }
 
-    /// 准备目标目录
-    fn prepare_target_directory(&self, anime_path_root_str: &str, anime_display_name: &str, year: &str) -> Result<std::path::PathBuf, String> {
-        let cleaned_anime_name_for_folder = clean_filename(anime_display_name);
-        let target_anime_folder_name = format!("{}({})", cleaned_anime_name_for_folder, year);
-        let target_anime_dir = std::path::Path::new(anime_path_root_str).join(target_anime_folder_name);
+    fn enqueue_task(&mut self, task: TaskRequest) -> Result<(), String> {
+        self.focused_task_id = Some(task.id);
+        self.tasks.push(TaskListEntry {
+            id: task.id,
+            title: task.title.clone(),
+            status: TaskStatus::Queued,
+            completed_files: 0,
+            total_files: task.source_files.len(),
+            detail: format!(
+                "源目录: {} -> 目标目录: {}",
+                task.base_path, task.anime_path
+            ),
+        });
 
-        std::fs::create_dir_all(&target_anime_dir)
-            .map_err(|e| format!("错误: 创建目标文件夹失败: {}", e))?;
-        
-        Ok(target_anime_dir)
-    }    /// 执行文件硬链接
-    fn execute_file_renaming(
-        &self,
-        source_files: &[String],
-        base_path_str: &str,
-        formatted_episode_names: &[String],
-        target_anime_dir: &std::path::Path,
-        transfer_mode: VideoTransferMode,
-    ) -> FileOperationReport {
-        let mut report = FileOperationReport::new();
-        report.transfer_mode = transfer_mode;
+        self.task_sender
+            .send(task)
+            .map_err(|_| "错误: 后台任务线程不可用".to_string())
+    }
 
-        if source_files.len() > formatted_episode_names.len() {
-            let msg = format!(
-                "警告: 选择的文件数量 ({}) 多于剧集数量 ({}). 是否继续?",
-                source_files.len(),
-                formatted_episode_names.len()
-            );
-            if dialog::choice2_default(&msg, "继续", "取消", "") != Some(0) {
-                report.cancelled = true;
-                report.cancel_message = Some("已取消：文件数量多于剧集数量".to_string());
-                return report;
-            }
+    fn find_task_mut(&mut self, task_id: u64) -> Option<&mut TaskListEntry> {
+        self.tasks.iter_mut().find(|task| task.id == task_id)
+    }
+
+    fn handle_task_started(&mut self, task_id: u64, total_files: usize) {
+        self.current_task_id = Some(task_id);
+        self.focused_task_id = Some(task_id);
+        if let Some(task) = self.find_task_mut(task_id) {
+            task.status = TaskStatus::Running;
+            task.completed_files = 0;
+            task.total_files = total_files;
+            task.detail = "任务开始执行，正在准备文件处理...".to_string();
         }
+        self.set_info(&format!("任务 #{} 开始执行", task_id));
+    }
 
-        let mut active_transfer_mode = transfer_mode;
+    fn handle_task_progress(
+        &mut self,
+        task_id: u64,
+        completed_files: usize,
+        total_files: usize,
+        current_file: &str,
+    ) {
+        if let Some(task) = self.find_task_mut(task_id) {
+            task.status = TaskStatus::Running;
+            task.completed_files = completed_files;
+            task.total_files = total_files;
+            task.detail = format!("正在处理: {}", current_file);
+        }
+    }
 
-        for (i, source_file_name_str) in source_files.iter().enumerate() {
-            if i >= formatted_episode_names.len() {
-                report.skipped_files += 1;
-                report.details.push(format!("跳过文件 '{}': 超出剧集范围", source_file_name_str));
-                continue;
-            }
+    fn handle_task_finished(
+        &mut self,
+        task_id: u64,
+        result: Result<FileOperationReport, String>,
+    ) {
+        self.current_task_id = None;
+        self.focused_task_id = Some(task_id);
 
-            let source_file_path = std::path::Path::new(base_path_str).join(source_file_name_str);
-            let original_extension = source_file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            let cleaned_episode_name_part = clean_filename(&formatted_episode_names[i]);
-            let new_file_name_str = if original_extension.is_empty() {
-                cleaned_episode_name_part.clone()
-            } else {
-                format!("{}.{}", cleaned_episode_name_part, original_extension)
-            };
-            
-            let target_file_path = target_anime_dir.join(&new_file_name_str);
-
-            if source_file_path == target_file_path {
-                report.skipped_files += 1;
-                report
-                    .details
-                    .push(format!("跳过文件 '{}': 源与目标相同", source_file_name_str));
-                continue;
-            }
-            if target_file_path.exists() {
-                report.skipped_files += 1;
-                report
-                    .details
-                    .push(format!("跳过文件 '{}': 目标已存在", source_file_name_str));
-                continue;
-            }
-
-            match copy_or_link_file(&source_file_path, &target_file_path, active_transfer_mode) {
-                Ok(_) => {
-                    report.successful_links += 1;
-                    self.copy_matching_subtitles(
-                        &mut report,
-                        source_file_name_str,
-                        base_path_str,
-                        &cleaned_episode_name_part,
-                        target_anime_dir,
-                    );
+        match result {
+            Ok(report) => {
+                let summary = report.summary();
+                if let Some(task) = self.find_task_mut(task_id) {
+                    task.completed_files = task.total_files;
+                    task.detail = summary.clone();
+                    task.status = if report.is_clean_success() {
+                        TaskStatus::Completed
+                    } else if report.successful_links == 0 && report.failed_links > 0 {
+                        TaskStatus::Failed
+                    } else {
+                        TaskStatus::Partial
+                    };
                 }
-                Err(e) => {
-                    if active_transfer_mode == VideoTransferMode::HardLink
-                        && is_cross_device_link_error(&e)
-                    {
-                        if confirm_cross_volume_copy(
-                            std::path::Path::new(base_path_str),
-                            target_anime_dir,
-                        ) {
-                            active_transfer_mode = VideoTransferMode::Copy;
-                            report.transfer_mode = VideoTransferMode::Copy;
 
-                            match copy_or_link_file(
-                                &source_file_path,
-                                &target_file_path,
-                                active_transfer_mode,
-                            ) {
-                                Ok(_) => {
-                                    report.successful_links += 1;
-                                    self.copy_matching_subtitles(
-                                        &mut report,
-                                        source_file_name_str,
-                                        base_path_str,
-                                        &cleaned_episode_name_part,
-                                        target_anime_dir,
-                                    );
-                                    continue;
-                                }
-                                Err(copy_err) => {
-                                    report.failed_links += 1;
-                                    report.details.push(format!(
-                                        "失败: '{}', 错误: {}",
-                                        source_file_name_str, copy_err
-                                    ));
-                                    continue;
-                                }
-                            }
-                        }
-
-                        report.cancelled = true;
-                        report.cancel_message = Some("已取消：跨盘复制未确认".to_string());
-                        return report;
-                    }
-
-                    report.failed_links += 1;
-                    report
-                        .details
-                        .push(format!("失败: '{}', 错误: {}", source_file_name_str, e));
+                self.set_info(&summary);
+                if let Some(detail_message) = report.detail_message() {
+                    dialog::message_default(&detail_message);
                 }
             }
+            Err(error) => {
+                if let Some(task) = self.find_task_mut(task_id) {
+                    task.completed_files = task.total_files;
+                    task.status = TaskStatus::Failed;
+                    task.detail = error.clone();
+                }
+                self.set_info(&error);
+            }
         }
-
-        report
     }
 
     fn choose_video_transfer_mode(
@@ -1016,60 +1260,19 @@ impl Cuby {
         }
     }
 
-    fn copy_matching_subtitles(
-        &self,
-        report: &mut FileOperationReport,
-        source_file_name_str: &str,
-        base_path_str: &str,
-        cleaned_episode_name_part: &str,
-        target_anime_dir: &std::path::Path,
-    ) {
-        let subtitle_files = find_matching_subtitle_files(source_file_name_str, base_path_str);
-        for (subtitle_file_name, subtitle_ext) in subtitle_files {
-            let source_subtitle_path = std::path::Path::new(base_path_str).join(&subtitle_file_name);
-
-            let subtitle_new_name = if subtitle_file_name.starts_with(&format!(
-                "{}.",
-                source_file_name_str
-                    .rsplit_once('.')
-                    .map(|(base, _)| base)
-                    .unwrap_or(source_file_name_str)
-            )) {
-                let video_base = source_file_name_str
-                    .rsplit_once('.')
-                    .map(|(base, _)| base)
-                    .unwrap_or(source_file_name_str);
-                let subtitle_base = subtitle_file_name
-                    .rsplit_once('.')
-                    .map(|(base, _)| base)
-                    .unwrap_or(&subtitle_file_name);
-                let language_part = &subtitle_base[video_base.len()..];
-                format!("{}{}.{}", cleaned_episode_name_part, language_part, subtitle_ext)
-            } else {
-                format!("{}.{}", cleaned_episode_name_part, subtitle_ext)
-            };
-
-            let target_subtitle_path = target_anime_dir.join(&subtitle_new_name);
-            if !target_subtitle_path.exists() {
-                match std::fs::copy(&source_subtitle_path, &target_subtitle_path) {
-                    Ok(_) => {
-                        report.subtitle_copied += 1;
-                    }
-                    Err(e) => {
-                        report.subtitle_failed += 1;
-                        report.details.push(format!(
-                            "字幕文件复制失败: '{}', 错误: {}",
-                            subtitle_file_name, e
-                        ));
-                    }
-                }
-            } else {
-                report.subtitle_skipped += 1;
-                report
-                    .details
-                    .push(format!("跳过字幕文件 '{}': 目标已存在", subtitle_file_name));
-            }
+    /// 统一验证：路径是否已设置
+    fn is_check(&self) -> Result<(String, String), String> {
+        if self.base_path.is_empty() {
+            return Err("错误: 未设置源文件路径（B按钮）".to_string());
         }
+        if self.anime_path.is_empty() {
+            return Err("错误: 未设置目标位置路径（A按钮）".to_string());
+        }
+
+        let base_path_str = self.base_path.clone();
+        let anime_path_str = self.anime_path.clone();
+
+        Ok((base_path_str, anime_path_str))
     }
 }
 // main函数
