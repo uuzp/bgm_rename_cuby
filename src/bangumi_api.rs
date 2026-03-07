@@ -656,6 +656,35 @@ fn percent_encode_path_segment(input: &str) -> String {
     out
 }
 
+fn simplify_search_keywords(input: &str) -> String {
+    const TRIMMABLE: &[char] = &[
+        '!', '?', '.', ',', ':', ';', '~', '!',
+        '！', '？', '。', '，', '：', '；', '～', '、',
+        '"', '\'', '“', '”', '‘', '’',
+        '(', ')', '[', ']', '{', '}',
+        '（', '）', '【', '】', '《', '》',
+    ];
+
+    input
+        .trim()
+        .trim_matches(TRIMMABLE)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn search_subjects_once(keywords: &str) -> Result<Vec<Subject>, BangumiError> {
+    let encoded_keywords = percent_encode_path_segment(keywords);
+    let url = format!(
+        "{}/search/subject/{}?type=2&responseGroup=large&limit=25",
+        BGM_API_BASE,
+        encoded_keywords
+    );
+
+    let response: SearchResponse = fetch_json(&url)?;
+    Ok(response.list)
+}
+
 // 直接且明确的API函数
 pub fn search_subjects(keywords: &str) -> Result<Vec<Subject>, BangumiError> {
     let trimmed = keywords.trim();
@@ -665,16 +694,21 @@ pub fn search_subjects(keywords: &str) -> Result<Vec<Subject>, BangumiError> {
     if trimmed.len() > 100 {
         return Err(BangumiError::InvalidInput("搜索关键词过长".into()));
     }
-    
-    let encoded_keywords = percent_encode_path_segment(trimmed);
-    let url = format!(
-        "{}/search/subject/{}?type=2&responseGroup=large&limit=25",
-        BGM_API_BASE,
-        encoded_keywords
-    );
-    
-    let response: SearchResponse = fetch_json(&url)?;
-    Ok(response.list)
+
+    match search_subjects_once(trimmed) {
+        Ok(results) => Ok(results),
+        Err(err) => {
+            let simplified = simplify_search_keywords(trimmed);
+            if simplified.is_empty() || simplified == trimmed {
+                return Err(err);
+            }
+
+            match err {
+                BangumiError::InvalidInput(_) => Err(err),
+                _ => search_subjects_once(&simplified),
+            }
+        }
+    }
 }
 
 // 修改为接受 Subject 引用，自动处理年份
@@ -732,6 +766,18 @@ mod tests {
             Err(BangumiError::InvalidInput(_)) => {},
             _ => panic!("Expected InvalidInput error"),
         }
+    }
+
+    #[test]
+    fn test_simplify_search_keywords_trims_trailing_punctuation() {
+        let simplified = simplify_search_keywords("Kage no Jitsuryokusha ni Naritakute!");
+        assert_eq!(simplified, "Kage no Jitsuryokusha ni Naritakute");
+    }
+
+    #[test]
+    fn test_simplify_search_keywords_collapses_spaces() {
+        let simplified = simplify_search_keywords("  Foo   Bar ！？ ");
+        assert_eq!(simplified, "Foo Bar");
     }
 
     #[test]
