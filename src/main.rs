@@ -125,6 +125,115 @@ struct Cuby {
     ui_mode: UiMode,
 }
 
+struct FileOperationReport {
+    successful_links: usize,
+    failed_links: usize,
+    skipped_files: usize,
+    subtitle_copied: usize,
+    subtitle_failed: usize,
+    subtitle_skipped: usize,
+    details: Vec<String>,
+    cancelled: bool,
+    cancel_message: Option<String>,
+    transfer_mode: VideoTransferMode,
+}
+
+impl FileOperationReport {
+    fn new() -> Self {
+        Self {
+            successful_links: 0,
+            failed_links: 0,
+            skipped_files: 0,
+            subtitle_copied: 0,
+            subtitle_failed: 0,
+            subtitle_skipped: 0,
+            details: Vec::new(),
+            cancelled: false,
+            cancel_message: None,
+            transfer_mode: VideoTransferMode::HardLink,
+        }
+    }
+
+    fn is_clean_success(&self) -> bool {
+        !self.cancelled
+            && self.failed_links == 0
+            && self.skipped_files == 0
+            && self.subtitle_failed == 0
+            && self.subtitle_skipped == 0
+    }
+
+    fn summary(&self) -> String {
+        if self.cancelled {
+            return self
+                .cancel_message
+                .clone()
+                .unwrap_or_else(|| "已取消".to_string());
+        }
+
+        let mut parts = vec![
+            format!("{} {}", self.transfer_mode.success_label(), self.successful_links),
+            format!("{} {}", self.transfer_mode.failure_label(), self.failed_links),
+        ];
+
+        if self.skipped_files > 0 {
+            parts.push(format!("跳过 {}", self.skipped_files));
+        }
+        if self.subtitle_copied > 0 {
+            parts.push(format!("字幕复制 {}", self.subtitle_copied));
+        }
+        if self.subtitle_failed > 0 {
+            parts.push(format!("字幕失败 {}", self.subtitle_failed));
+        }
+        if self.subtitle_skipped > 0 {
+            parts.push(format!("字幕跳过 {}", self.subtitle_skipped));
+        }
+
+        format!("完成: {}", parts.join("，"))
+    }
+
+    fn detail_message(&self) -> Option<String> {
+        if self.details.is_empty() {
+            return None;
+        }
+
+        let max_lines = 12;
+        let mut lines: Vec<String> = self.details.iter().take(max_lines).cloned().collect();
+        if self.details.len() > max_lines {
+            lines.push(format!("... 其余 {} 条省略", self.details.len() - max_lines));
+        }
+
+        Some(format!("{}\n\n{}", self.summary(), lines.join("\n")))
+    }
+}
+
+enum OperationOutcome {
+    Success(String),
+    Partial(FileOperationReport),
+    Cancelled(String),
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum VideoTransferMode {
+    HardLink,
+    Copy,
+}
+
+impl VideoTransferMode {
+    fn success_label(self) -> &'static str {
+        match self {
+            VideoTransferMode::HardLink => "视频硬链接成功",
+            VideoTransferMode::Copy => "视频复制成功",
+        }
+    }
+
+    fn failure_label(self) -> &'static str {
+        match self {
+            VideoTransferMode::HardLink => "视频硬链接失败",
+            VideoTransferMode::Copy => "视频复制失败",
+        }
+    }
+}
+
 impl Cuby {
     fn new(cli_args: &CliArgs) -> Self {
         // 创建应用和窗口
@@ -543,18 +652,28 @@ impl Cuby {
     fn handle_start_button(&mut self) {
         let result = self.execute_operation();
         match result {
-            Ok(message) => {
+            Ok(OperationOutcome::Success(message)) => {
                 self.on_operation_success(&message);
-            },
+            }
+            Ok(OperationOutcome::Partial(report)) => {
+                let summary = report.summary();
+                self.set_info(&summary);
+                if let Some(detail_message) = report.detail_message() {
+                    dialog::message_default(&detail_message);
+                }
+            }
+            Ok(OperationOutcome::Cancelled(message)) => {
+                self.set_info(&message);
+            }
             Err(error) => {
                 // 操作失败时，不清空列表，只显示错误信息
                 self.set_info(&error);
-            },
+            }
         }
     }
 
     /// 执行完整操作流程
-    fn execute_operation(&mut self) -> Result<String, String> {
+    fn execute_operation(&mut self) -> Result<OperationOutcome, String> {
         // 统一验证
         let (base_path_str, anime_path_str) = self.is_check()?;
 
@@ -570,16 +689,26 @@ impl Cuby {
 
         // 创建目标目录
         let target_anime_dir = self.prepare_target_directory(&anime_path_str, &anime_display_name, &year)?;
+        let transfer_mode = self.choose_video_transfer_mode(&base_path_str, &target_anime_dir)?;
 
         // 执行操作
-        let (successful, failed, _errors) = self.execute_file_operations(
+        let report = self.execute_file_operations(
             &source_files,
             &base_path_str,
             episodes,
             &target_anime_dir,
+            transfer_mode,
         );
 
-        Ok(format!("完成: {}成功 {}失败", successful, failed))
+        if report.cancelled {
+            return Ok(OperationOutcome::Cancelled(report.summary()));
+        }
+
+        if report.is_clean_success() {
+            Ok(OperationOutcome::Success(report.summary()))
+        } else {
+            Ok(OperationOutcome::Partial(report))
+        }
     }
 
     /// 统一验证：路径是否已设置
@@ -604,9 +733,16 @@ impl Cuby {
         base_path_str: &str,
         episodes: &bangumi_api::Episodes,
         target_anime_dir: &std::path::Path,
-    ) -> (usize, usize, Vec<String>) {
+        transfer_mode: VideoTransferMode,
+    ) -> FileOperationReport {
         let formatted_episode_names = episodes.formatted_names();
-        self.execute_file_renaming(source_files, base_path_str, &formatted_episode_names, target_anime_dir)
+        self.execute_file_renaming(
+            source_files,
+            base_path_str,
+            &formatted_episode_names,
+            target_anime_dir,
+            transfer_mode,
+        )
     }
 
     /// 准备目标目录
@@ -625,32 +761,37 @@ impl Cuby {
         source_files: &[String],
         base_path_str: &str,
         formatted_episode_names: &[String],
-        target_anime_dir: &std::path::Path,    ) -> (usize, usize, Vec<String>) {
-        let mut successful_links = 0;
-        let mut failed_links = 0;
-        let mut errors_log = Vec::new();
+        target_anime_dir: &std::path::Path,
+        transfer_mode: VideoTransferMode,
+    ) -> FileOperationReport {
+        let mut report = FileOperationReport::new();
+        report.transfer_mode = transfer_mode;
 
         if source_files.len() > formatted_episode_names.len() {
             let msg = format!(
                 "警告: 选择的文件数量 ({}) 多于剧集数量 ({}). 是否继续?",
                 source_files.len(),
                 formatted_episode_names.len()
-            );            if dialog::choice2_default(&msg, "继续", "取消", "") != Some(0) {
-                errors_log.push("操作被用户取消：文件数量多于剧集数量".to_string());
-                return (successful_links, failed_links, errors_log);
+            );
+            if dialog::choice2_default(&msg, "继续", "取消", "") != Some(0) {
+                report.cancelled = true;
+                report.cancel_message = Some("已取消：文件数量多于剧集数量".to_string());
+                return report;
             }
         }
 
+        let mut active_transfer_mode = transfer_mode;
+
         for (i, source_file_name_str) in source_files.iter().enumerate() {
             if i >= formatted_episode_names.len() {
-                let err_msg = format!("跳过文件 '{}': 超出剧集范围", source_file_name_str);
-                errors_log.push(err_msg);
+                report.skipped_files += 1;
+                report.details.push(format!("跳过文件 '{}': 超出剧集范围", source_file_name_str));
                 continue;
             }
 
             let source_file_path = std::path::Path::new(base_path_str).join(source_file_name_str);
             let original_extension = source_file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-              let cleaned_episode_name_part = clean_filename(&formatted_episode_names[i]);
+            let cleaned_episode_name_part = clean_filename(&formatted_episode_names[i]);
             let new_file_name_str = if original_extension.is_empty() {
                 cleaned_episode_name_part.clone()
             } else {
@@ -660,62 +801,156 @@ impl Cuby {
             let target_file_path = target_anime_dir.join(&new_file_name_str);
 
             if source_file_path == target_file_path {
-                let msg = format!("跳过文件 '{}': 源与目标相同", source_file_name_str);
-                errors_log.push(msg);
+                report.skipped_files += 1;
+                report
+                    .details
+                    .push(format!("跳过文件 '{}': 源与目标相同", source_file_name_str));
                 continue;
             }
-              if target_file_path.exists() {
-                let msg = format!("跳过文件 '{}': 目标已存在", source_file_name_str);
-                errors_log.push(msg);
-                failed_links += 1;
+            if target_file_path.exists() {
+                report.skipped_files += 1;
+                report
+                    .details
+                    .push(format!("跳过文件 '{}': 目标已存在", source_file_name_str));
                 continue;
-            }            match std::fs::hard_link(&source_file_path, &target_file_path) {
+            }
+
+            match copy_or_link_file(&source_file_path, &target_file_path, active_transfer_mode) {
                 Ok(_) => {
-                    successful_links += 1;
-                    
-                    // 处理匹配的字幕文件
-                    let subtitle_files = find_matching_subtitle_files(source_file_name_str, base_path_str);
-                    for (subtitle_file_name, subtitle_ext) in subtitle_files {
-                        let source_subtitle_path = std::path::Path::new(base_path_str).join(&subtitle_file_name);
-                        
-                        // 构造字幕文件的新名称
-                        let subtitle_new_name = if subtitle_file_name.starts_with(&format!("{}.", source_file_name_str.rsplit_once('.').map(|(base, _)| base).unwrap_or(source_file_name_str))) {
-                            // 带语言标识的字幕文件
-                            let video_base = source_file_name_str.rsplit_once('.').map(|(base, _)| base).unwrap_or(source_file_name_str);
-                            let subtitle_base = subtitle_file_name.rsplit_once('.').map(|(base, _)| base).unwrap_or(&subtitle_file_name);
-                            let language_part = &subtitle_base[video_base.len()..];
-                            format!("{}{}.{}", cleaned_episode_name_part, language_part, subtitle_ext)
-                        } else {
-                            // 完全匹配的字幕文件
-                            format!("{}.{}", cleaned_episode_name_part, subtitle_ext)
-                        };
-                        
-                        let target_subtitle_path = target_anime_dir.join(&subtitle_new_name);
-                        
-                        // 复制字幕文件（因为字幕文件通常较小，且可能会修改内容）
-                        if !target_subtitle_path.exists() {
-                            match std::fs::copy(&source_subtitle_path, &target_subtitle_path) {
-                                Ok(_) => {
-                                    // 字幕文件复制成功，记录到日志中
-                                    errors_log.push(format!("字幕文件复制成功: '{}' -> '{}'", subtitle_file_name, subtitle_new_name));
-                                }
-                                Err(e) => {
-                                    errors_log.push(format!("字幕文件复制失败: '{}', 错误: {}", subtitle_file_name, e));
-                                }
-                            }
-                        } else {
-                            errors_log.push(format!("跳过字幕文件 '{}': 目标已存在", subtitle_file_name));
-                        }
-                    }
+                    report.successful_links += 1;
+                    self.copy_matching_subtitles(
+                        &mut report,
+                        source_file_name_str,
+                        base_path_str,
+                        &cleaned_episode_name_part,
+                        target_anime_dir,
+                    );
                 }
                 Err(e) => {
-                    let err_msg = format!("失败: '{}', 错误: {}", source_file_name_str, e);
-                    errors_log.push(err_msg);
-                    failed_links += 1;
+                    if active_transfer_mode == VideoTransferMode::HardLink
+                        && is_cross_device_link_error(&e)
+                    {
+                        if confirm_cross_volume_copy(
+                            std::path::Path::new(base_path_str),
+                            target_anime_dir,
+                        ) {
+                            active_transfer_mode = VideoTransferMode::Copy;
+                            report.transfer_mode = VideoTransferMode::Copy;
+
+                            match copy_or_link_file(
+                                &source_file_path,
+                                &target_file_path,
+                                active_transfer_mode,
+                            ) {
+                                Ok(_) => {
+                                    report.successful_links += 1;
+                                    self.copy_matching_subtitles(
+                                        &mut report,
+                                        source_file_name_str,
+                                        base_path_str,
+                                        &cleaned_episode_name_part,
+                                        target_anime_dir,
+                                    );
+                                    continue;
+                                }
+                                Err(copy_err) => {
+                                    report.failed_links += 1;
+                                    report.details.push(format!(
+                                        "失败: '{}', 错误: {}",
+                                        source_file_name_str, copy_err
+                                    ));
+                                    continue;
+                                }
+                            }
+                        }
+
+                        report.cancelled = true;
+                        report.cancel_message = Some("已取消：跨盘复制未确认".to_string());
+                        return report;
+                    }
+
+                    report.failed_links += 1;
+                    report
+                        .details
+                        .push(format!("失败: '{}', 错误: {}", source_file_name_str, e));
                 }
             }
         }
-        (successful_links, failed_links, errors_log)
+
+        report
+    }
+
+    fn choose_video_transfer_mode(
+        &self,
+        base_path_str: &str,
+        target_anime_dir: &std::path::Path,
+    ) -> Result<VideoTransferMode, String> {
+        let source_root = std::path::Path::new(base_path_str);
+        if !paths_on_different_volumes(source_root, target_anime_dir) {
+            return Ok(VideoTransferMode::HardLink);
+        }
+
+        if confirm_cross_volume_copy(source_root, target_anime_dir) {
+            Ok(VideoTransferMode::Copy)
+        } else {
+            Err("已取消：跨盘复制未确认".to_string())
+        }
+    }
+
+    fn copy_matching_subtitles(
+        &self,
+        report: &mut FileOperationReport,
+        source_file_name_str: &str,
+        base_path_str: &str,
+        cleaned_episode_name_part: &str,
+        target_anime_dir: &std::path::Path,
+    ) {
+        let subtitle_files = find_matching_subtitle_files(source_file_name_str, base_path_str);
+        for (subtitle_file_name, subtitle_ext) in subtitle_files {
+            let source_subtitle_path = std::path::Path::new(base_path_str).join(&subtitle_file_name);
+
+            let subtitle_new_name = if subtitle_file_name.starts_with(&format!(
+                "{}.",
+                source_file_name_str
+                    .rsplit_once('.')
+                    .map(|(base, _)| base)
+                    .unwrap_or(source_file_name_str)
+            )) {
+                let video_base = source_file_name_str
+                    .rsplit_once('.')
+                    .map(|(base, _)| base)
+                    .unwrap_or(source_file_name_str);
+                let subtitle_base = subtitle_file_name
+                    .rsplit_once('.')
+                    .map(|(base, _)| base)
+                    .unwrap_or(&subtitle_file_name);
+                let language_part = &subtitle_base[video_base.len()..];
+                format!("{}{}.{}", cleaned_episode_name_part, language_part, subtitle_ext)
+            } else {
+                format!("{}.{}", cleaned_episode_name_part, subtitle_ext)
+            };
+
+            let target_subtitle_path = target_anime_dir.join(&subtitle_new_name);
+            if !target_subtitle_path.exists() {
+                match std::fs::copy(&source_subtitle_path, &target_subtitle_path) {
+                    Ok(_) => {
+                        report.subtitle_copied += 1;
+                    }
+                    Err(e) => {
+                        report.subtitle_failed += 1;
+                        report.details.push(format!(
+                            "字幕文件复制失败: '{}', 错误: {}",
+                            subtitle_file_name, e
+                        ));
+                    }
+                }
+            } else {
+                report.subtitle_skipped += 1;
+                report
+                    .details
+                    .push(format!("跳过字幕文件 '{}': 目标已存在", subtitle_file_name));
+            }
+        }
     }
 }
 // main函数
@@ -752,6 +987,70 @@ fn ext_in_list_ignore_ascii_case(ext: &str, list: &[&str]) -> bool {
         }
     }
     false
+}
+
+fn copy_or_link_file(
+    source_file_path: &std::path::Path,
+    target_file_path: &std::path::Path,
+    transfer_mode: VideoTransferMode,
+) -> std::io::Result<()> {
+    match transfer_mode {
+        VideoTransferMode::HardLink => std::fs::hard_link(source_file_path, target_file_path),
+        VideoTransferMode::Copy => std::fs::copy(source_file_path, target_file_path).map(|_| ()),
+    }
+}
+
+fn confirm_cross_volume_copy(
+    source_root: &std::path::Path,
+    target_root: &std::path::Path,
+) -> bool {
+    let message = format!(
+        "检测到源目录和目标目录不在同一磁盘。\n\n跨盘无法创建硬链接，只能改为复制视频文件。复制可能比较耗时，并且会额外占用硬盘空间。\n\n源目录: {}\n目标目录: {}\n\n是否继续？",
+        source_root.display(),
+        target_root.display()
+    );
+
+    dialog::choice2_default(&message, "继续复制", "取消", "") == Some(0)
+}
+
+fn is_cross_device_link_error(error: &std::io::Error) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        return error.raw_os_error() == Some(17);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        error.raw_os_error() == Some(18)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn paths_on_different_volumes(source: &std::path::Path, target: &std::path::Path) -> bool {
+    let source_prefix = windows_volume_prefix(source);
+    let target_prefix = windows_volume_prefix(target);
+
+    match (source_prefix, target_prefix) {
+        (Some(source_prefix), Some(target_prefix)) => source_prefix != target_prefix,
+        _ => false,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn paths_on_different_volumes(_source: &std::path::Path, _target: &std::path::Path) -> bool {
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn windows_volume_prefix(path: &std::path::Path) -> Option<String> {
+    use std::path::Component;
+
+    match path.components().next() {
+        Some(Component::Prefix(prefix)) => {
+            Some(prefix.as_os_str().to_string_lossy().to_ascii_lowercase())
+        }
+        _ => None,
+    }
 }
 
 /// 查找与视频文件同名的字幕文件
