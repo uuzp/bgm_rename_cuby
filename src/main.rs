@@ -104,6 +104,7 @@ enum Message {
     SearchBrowserRightClick,
     OpenTaskFolder,
     RemoveQueuedTask,
+    RetryTask,
     SearchCompleted {
         query: String,
         result: Result<Vec<bangumi_api::Subject>, String>,
@@ -150,6 +151,7 @@ struct Cuby {
     task_status_frame: Frame,
     task_open_folder_btn: Button,
     task_remove_btn: Button,
+    task_retry_btn: Button,
     task_detail_frame: Frame,
     search_input: Input,
     info_frame: Frame,
@@ -198,6 +200,7 @@ struct TaskRequest {
 struct TaskListEntry {
     id: u64,
     title: String,
+    request: Option<TaskRequest>,
     base_path: String,
     anime_path: String,
     target_dir: String,
@@ -675,8 +678,12 @@ impl Cuby {
         let mut task_remove_btn = Button::default().with_label("移除");
         task_remove_btn.emit(sender.clone(), Message::RemoveQueuedTask);
         task_remove_btn.set_tooltip("移除等待中的任务");
+        let mut task_retry_btn = Button::default().with_label("重试");
+        task_retry_btn.emit(sender.clone(), Message::RetryTask);
+        task_retry_btn.set_tooltip("重新加入失败或部分完成的任务");
         task_status_row.fixed(&task_open_folder_btn, 36);
         task_status_row.fixed(&task_remove_btn, 52);
+        task_status_row.fixed(&task_retry_btn, 52);
         task_status_row.end();
 
         let mut task_detail_frame = Frame::default().with_label(
@@ -724,6 +731,7 @@ impl Cuby {
             task_status_frame,
             task_open_folder_btn,
             task_remove_btn,
+            task_retry_btn,
             task_detail_frame,
             search_input,
             info_frame,
@@ -813,6 +821,10 @@ impl Cuby {
                 self.handle_remove_queued_task();
                 true
             }
+            Message::RetryTask => {
+                self.handle_retry_task();
+                true
+            }
             Message::SearchCompleted { query, result } => {
                 self.handle_search_completed(query, result);
                 true
@@ -856,6 +868,7 @@ impl Cuby {
         self.task_progress.redraw();
         self.task_status_frame.redraw();
         self.task_remove_btn.redraw();
+        self.task_retry_btn.redraw();
         self.task_detail_frame.redraw();
         self.info_frame.redraw();
         self.wind.redraw();
@@ -917,6 +930,11 @@ impl Cuby {
             } else {
                 self.task_remove_btn.deactivate();
             }
+            if matches!(task.status, TaskStatus::Failed | TaskStatus::Partial) {
+                self.task_retry_btn.activate();
+            } else {
+                self.task_retry_btn.deactivate();
+            }
             self.task_detail_frame.set_label(&format!(
                 "任务：{}\n进度：{}/{}\n源目录：{}\n目标目录：{}\n说明：{}",
                 task.title,
@@ -932,6 +950,7 @@ impl Cuby {
             self.task_status_frame.set_label("状态：空闲");
             self.task_open_folder_btn.deactivate();
             self.task_remove_btn.deactivate();
+            self.task_retry_btn.deactivate();
             self.task_detail_frame.set_label(
                 "当前任务：暂无\n进度：等待接入后台队列\n说明：这一页会承接后续的任务列表、进度条和结果摘要。",
             );
@@ -1012,6 +1031,41 @@ impl Cuby {
             .map(|task| task.id);
 
         self.set_info(&format!("已移除等待任务 #{}: {}", removed_task.id, removed_task.title));
+    }
+
+    fn handle_retry_task(&mut self) {
+        let Some(task_id) = self.focused_task_id else {
+            self.set_info("请先选择一个可重试的任务");
+            return;
+        };
+
+        let Some(task_index) = self.tasks.iter().position(|task| task.id == task_id) else {
+            self.set_info("选择的任务不存在");
+            return;
+        };
+
+        let task = self.tasks[task_index].clone();
+        if !matches!(task.status, TaskStatus::Failed | TaskStatus::Partial) {
+            self.set_info("只能重试失败或部分完成的任务");
+            return;
+        }
+
+        let Some(mut task_request) = task.request.clone() else {
+            self.set_info("当前任务缺少可重试的快照");
+            return;
+        };
+
+        let original_id = task_request.id;
+        task_request.id = self.next_task_id;
+        self.next_task_id += 1;
+        task_request.title = task.title.clone();
+
+        if let Err(error) = self.enqueue_task(task_request) {
+            self.set_info(&error);
+            return;
+        }
+
+        self.set_info(&format!("已将任务 #{} 重新加入队列", original_id));
     }
 
     fn set_info(&mut self, message: &str) {
@@ -1316,6 +1370,7 @@ impl Cuby {
         self.tasks.push(TaskListEntry {
             id: task.id,
             title: task.title.clone(),
+            request: Some(task.clone()),
             base_path: task.base_path.clone(),
             anime_path: task.anime_path.clone(),
             target_dir: task_target_dir.to_string_lossy().to_string(),
