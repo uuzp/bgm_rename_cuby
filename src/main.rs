@@ -1078,7 +1078,9 @@ impl Cuby {
             self.focused_task_id = Some(task.id);
         }
 
-        self.task_context_menu.resize(x, y, 1, 1);
+        let menu_x = x - self.wind.x();
+        let menu_y = y - self.wind.y();
+        self.task_context_menu.resize(menu_x, menu_y, 1, 1);
         let Some(item) = self.task_context_menu.popup() else {
             return;
         };
