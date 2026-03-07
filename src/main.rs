@@ -83,7 +83,7 @@ fn parse_cli_args() -> CliArgs {
     parsed
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 enum Message {
     Register,
     Logout,
@@ -98,6 +98,14 @@ enum Message {
     SearchBrowserPush,
     SearchBrowserDoubleClick,
     SearchBrowserRightClick,
+    SearchCompleted {
+        query: String,
+        result: Result<Vec<bangumi_api::Subject>, String>,
+    },
+    EpisodesCompleted {
+        subject: bangumi_api::Subject,
+        result: Result<bangumi_api::Episodes, String>,
+    },
 }
 
 #[derive(Clone)]
@@ -112,6 +120,7 @@ enum UiMode {
 
 struct Cuby {
     app: app::App,
+    sender: app::Sender<Message>,
     wind: Window,
     file_browser: HoldBrowser,
     search_browser: HoldBrowser,
@@ -123,6 +132,8 @@ struct Cuby {
     anime_path: String,
 
     ui_mode: UiMode,
+    pending_search_query: Option<String>,
+    pending_episode_subject_id: Option<u64>,
 }
 
 struct FileOperationReport {
@@ -367,6 +378,7 @@ impl Cuby {
         
         Self {
             app,
+            sender,
             wind,
             file_browser,
             search_browser,
@@ -376,6 +388,8 @@ impl Cuby {
             base_path,
             anime_path,
             ui_mode: UiMode::Idle,
+            pending_search_query: None,
+            pending_episode_subject_id: None,
         }
     }
 
@@ -437,6 +451,14 @@ impl Cuby {
             }
             Message::SearchBrowserRightClick => {
                 self.handle_search_results_right_click();
+                true
+            }
+            Message::SearchCompleted { query, result } => {
+                self.handle_search_completed(query, result);
+                true
+            }
+            Message::EpisodesCompleted { subject, result } => {
+                self.handle_episodes_completed(subject, result);
                 true
             }
         };
@@ -575,7 +597,7 @@ impl Cuby {
         if query.is_empty() {
             self.set_info("无关键词");
         } else {
-            self.handle_search(&query);
+            self.start_search(query);
         }
     }
 
@@ -588,9 +610,32 @@ impl Cuby {
         }
     }
 
-    /// 处理搜索逻辑并更新UI
-    fn handle_search(&mut self, query: &str) {
-        match bangumi_api::search_subjects(query) {
+    fn start_search(&mut self, query: String) {
+        self.pending_search_query = Some(query.clone());
+        self.pending_episode_subject_id = None;
+        self.ui_mode = UiMode::Idle;
+        self.search_browser.clear();
+        self.search_browser.add("搜索中...");
+        self.set_info(&format!("正在搜索: {}", query));
+
+        let sender = self.sender.clone();
+        std::thread::spawn(move || {
+            let result = bangumi_api::search_subjects(&query).map_err(|err| err.to_string());
+            sender.send(Message::SearchCompleted { query, result });
+        });
+    }
+
+    fn handle_search_completed(
+        &mut self,
+        query: String,
+        result: Result<Vec<bangumi_api::Subject>, String>,
+    ) {
+        if self.pending_search_query.as_deref() != Some(query.as_str()) {
+            return;
+        }
+        self.pending_search_query = None;
+
+        match result {
             Ok(subjects) => {
                 if subjects.is_empty() {
                     self.reset_search_ui();
@@ -615,7 +660,33 @@ impl Cuby {
             return;
         };
 
-        match bangumi_api::get_episodes(&selected_subject) {
+        self.pending_episode_subject_id = Some(selected_subject.id);
+        self.set_info(&format!(
+            "正在加载《{}》的剧集信息...",
+            selected_subject.display_name()
+        ));
+
+        let sender = self.sender.clone();
+        std::thread::spawn(move || {
+            let result = bangumi_api::get_episodes(&selected_subject).map_err(|err| err.to_string());
+            sender.send(Message::EpisodesCompleted {
+                subject: selected_subject,
+                result,
+            });
+        });
+    }
+
+    fn handle_episodes_completed(
+        &mut self,
+        subject: bangumi_api::Subject,
+        result: Result<bangumi_api::Episodes, String>,
+    ) {
+        if self.pending_episode_subject_id != Some(subject.id) {
+            return;
+        }
+        self.pending_episode_subject_id = None;
+
+        match result {
             Ok(episodes) => {
                 let rendered = self.render_episode_list(&episodes);
                 if rendered == 0 {
@@ -624,13 +695,9 @@ impl Cuby {
                     self.set_info(&format!("已加载 {} 集剧集信息", rendered));
                 }
 
-                self.ui_mode = UiMode::EpisodeList {
-                    subject: selected_subject,
-                    episodes,
-                };
+                self.ui_mode = UiMode::EpisodeList { subject, episodes };
             }
             Err(err_msg) => {
-                // 保持搜索结果列表不变，允许用户重试
                 self.set_info(&format!("获取剧集信息失败: {}", err_msg));
             }
         }
