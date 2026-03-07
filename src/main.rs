@@ -16,6 +16,8 @@ use fltk::{
 };
 #[cfg(not(target_os = "windows"))]
 use std::process::Command;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 // Some bundled FLTK builds reference GDI+ symbols; ensure we link the import lib.
 #[cfg(target_os = "windows")]
@@ -101,6 +103,7 @@ enum Message {
     SearchBrowserDoubleClick,
     SearchBrowserRightClick,
     OpenTaskFolder,
+    RemoveQueuedTask,
     SearchCompleted {
         query: String,
         result: Result<Vec<bangumi_api::Subject>, String>,
@@ -146,6 +149,7 @@ struct Cuby {
     task_progress: Progress,
     task_status_frame: Frame,
     task_open_folder_btn: Button,
+    task_remove_btn: Button,
     task_detail_frame: Frame,
     search_input: Input,
     info_frame: Frame,
@@ -161,6 +165,7 @@ struct Cuby {
     next_task_id: u64,
     current_task_id: Option<u64>,
     focused_task_id: Option<u64>,
+    cancelled_task_ids: Arc<Mutex<HashSet<u64>>>,
 }
 
 #[derive(Clone)]
@@ -479,9 +484,18 @@ fn copy_matching_subtitles(
 fn spawn_task_worker(
     receiver: std::sync::mpsc::Receiver<TaskRequest>,
     sender: app::Sender<Message>,
+    cancelled_task_ids: Arc<Mutex<HashSet<u64>>>,
 ) {
     std::thread::spawn(move || {
         while let Ok(task) = receiver.recv() {
+            let should_skip = cancelled_task_ids
+                .lock()
+                .map(|mut cancelled| cancelled.remove(&task.id))
+                .unwrap_or(false);
+            if should_skip {
+                continue;
+            }
+
             let total_files = task.source_files.len();
             sender.send(Message::TaskStarted {
                 task_id: task.id,
@@ -511,7 +525,8 @@ impl Cuby {
         let app = app::App::default();
         let (sender, receiver) = app::channel::<Message>();
         let (task_sender, task_receiver) = std::sync::mpsc::channel::<TaskRequest>();
-        spawn_task_worker(task_receiver, sender.clone());
+        let cancelled_task_ids = Arc::new(Mutex::new(HashSet::new()));
+        spawn_task_worker(task_receiver, sender.clone(), cancelled_task_ids.clone());
         let mut wind = Window::default()
             .with_size(1200, 600)
             .with_label("BGM Rename Cuby");
@@ -657,7 +672,11 @@ impl Cuby {
         let mut task_open_folder_btn = Button::default().with_label("📁");
         task_open_folder_btn.emit(sender.clone(), Message::OpenTaskFolder);
         task_open_folder_btn.set_tooltip("打开任务对应文件夹");
+        let mut task_remove_btn = Button::default().with_label("移除");
+        task_remove_btn.emit(sender.clone(), Message::RemoveQueuedTask);
+        task_remove_btn.set_tooltip("移除等待中的任务");
         task_status_row.fixed(&task_open_folder_btn, 36);
+        task_status_row.fixed(&task_remove_btn, 52);
         task_status_row.end();
 
         let mut task_detail_frame = Frame::default().with_label(
@@ -704,6 +723,7 @@ impl Cuby {
             task_progress,
             task_status_frame,
             task_open_folder_btn,
+            task_remove_btn,
             task_detail_frame,
             search_input,
             info_frame,
@@ -717,6 +737,7 @@ impl Cuby {
             next_task_id: 1,
             current_task_id: None,
             focused_task_id: None,
+            cancelled_task_ids,
         }
     }
 
@@ -788,6 +809,10 @@ impl Cuby {
                 self.handle_open_task_folder();
                 true
             }
+            Message::RemoveQueuedTask => {
+                self.handle_remove_queued_task();
+                true
+            }
             Message::SearchCompleted { query, result } => {
                 self.handle_search_completed(query, result);
                 true
@@ -830,6 +855,7 @@ impl Cuby {
         self.task_browser.redraw();
         self.task_progress.redraw();
         self.task_status_frame.redraw();
+        self.task_remove_btn.redraw();
         self.task_detail_frame.redraw();
         self.info_frame.redraw();
         self.wind.redraw();
@@ -886,6 +912,11 @@ impl Cuby {
             self.task_status_frame
                 .set_label(&format!("状态：{}", task.status.label()));
             self.task_open_folder_btn.activate();
+            if task.status == TaskStatus::Queued {
+                self.task_remove_btn.activate();
+            } else {
+                self.task_remove_btn.deactivate();
+            }
             self.task_detail_frame.set_label(&format!(
                 "任务：{}\n进度：{}/{}\n源目录：{}\n目标目录：{}\n说明：{}",
                 task.title,
@@ -900,6 +931,7 @@ impl Cuby {
             self.task_progress.set_label("0%");
             self.task_status_frame.set_label("状态：空闲");
             self.task_open_folder_btn.deactivate();
+            self.task_remove_btn.deactivate();
             self.task_detail_frame.set_label(
                 "当前任务：暂无\n进度：等待接入后台队列\n说明：这一页会承接后续的任务列表、进度条和结果摘要。",
             );
@@ -950,6 +982,36 @@ impl Cuby {
         if let Err(error) = open_path_in_file_manager(std::path::Path::new(preferred_path)) {
             self.set_info(&format!("打开任务文件夹失败: {}", error));
         }
+    }
+
+    fn handle_remove_queued_task(&mut self) {
+        let Some(task_id) = self.focused_task_id else {
+            self.set_info("请先选择一个等待中的任务");
+            return;
+        };
+
+        let Some(task_index) = self.tasks.iter().position(|task| task.id == task_id) else {
+            self.set_info("选择的任务不存在");
+            return;
+        };
+
+        if self.tasks[task_index].status != TaskStatus::Queued {
+            self.set_info("只能移除等待中的任务");
+            return;
+        }
+
+        let removed_task = self.tasks.remove(task_index);
+        if let Ok(mut cancelled) = self.cancelled_task_ids.lock() {
+            cancelled.insert(removed_task.id);
+        }
+
+        self.focused_task_id = self
+            .tasks
+            .get(task_index)
+            .or_else(|| self.tasks.last())
+            .map(|task| task.id);
+
+        self.set_info(&format!("已移除等待任务 #{}: {}", removed_task.id, removed_task.title));
     }
 
     fn set_info(&mut self, message: &str) {
