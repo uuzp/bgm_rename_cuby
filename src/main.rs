@@ -7,8 +7,9 @@ use fltk::{
     button::Button,
     enums,
     frame::Frame,
-    group::Flex,
+    group::{Flex, Tabs},
     input::Input,
+    misc::Progress,
     menu::MenuButton,
     prelude::*,
     window::Window,
@@ -124,6 +125,10 @@ struct Cuby {
     wind: Window,
     file_browser: HoldBrowser,
     search_browser: HoldBrowser,
+    task_browser: HoldBrowser,
+    task_progress: Progress,
+    task_status_frame: Frame,
+    task_detail_frame: Frame,
     search_input: Input,
     info_frame: Frame,
     receiver: app::Receiver<Message>,
@@ -253,10 +258,12 @@ impl Cuby {
         let mut wind = Window::default()
             .with_size(1200, 600)
             .with_label("BGM Rename Cuby");
-        
-        // 创建主Flex布局，垂直排列(上中下三区域)
-        let mut main_flex = Flex::default_fill().column();
-        
+
+        let mut tabs = Tabs::default_fill();
+        tabs.set_tab_align(enums::Align::Left);
+
+        let mut list_page = Flex::default_fill().column().with_label("列\n表");
+
         // 上区域：菜单按钮、按钮B、按钮A、搜索框和搜索按钮
         let mut top_flex = Flex::default().row();
 
@@ -290,7 +297,7 @@ impl Cuby {
         top_flex.fixed(&search_btn, 50);
         top_flex.fixed(&menu_btn, 60);
         top_flex.end();
-        main_flex.fixed(&top_flex, 30);
+        list_page.fixed(&top_flex, 30);
         
         // 中区域：文件列表和搜索列表
         let mut mid_flex = Flex::default().row();
@@ -331,7 +338,8 @@ impl Cuby {
             });
         }
         mid_flex.fixed(&search_browser, 400);
-        mid_flex.end();          
+        mid_flex.end();
+
         // 下区域：路径信息Frame和开始按钮
         let mut bottom_flex = Flex::default().row();        
         let mut info_frame = Frame::default().with_label("@");
@@ -352,10 +360,46 @@ impl Cuby {
         bottom_flex.fixed(&btn_container, 60);
         bottom_flex.fixed(&right_margin, 5);
         bottom_flex.end();
-        
-        main_flex.fixed(&bottom_flex, 30);
-        main_flex.end();
-        wind.resizable(&main_flex);
+
+        list_page.fixed(&mid_flex, 1);
+        list_page.fixed(&bottom_flex, 30);
+        list_page.end();
+
+        let mut task_page = Flex::default_fill().column().with_label("任\n务");
+        task_page.set_margin(12);
+        task_page.set_pad(10);
+
+        let mut task_header = Frame::default().with_label("任务队列");
+        task_header.set_align(enums::Align::Left | enums::Align::Inside);
+        task_header.set_label_size(20);
+        task_page.fixed(&task_header, 32);
+
+        let mut task_browser = HoldBrowser::default();
+        task_browser.add("当前还没有排队任务");
+        task_browser.add("后续点击开始后，这里会显示等待中/进行中/已完成的任务");
+
+        let mut task_progress = Progress::default();
+        task_progress.set_minimum(0.0);
+        task_progress.set_maximum(100.0);
+        task_progress.set_value(0.0);
+        task_progress.set_label("0%");
+
+        let mut task_status_frame = Frame::default().with_label("状态：空闲");
+        task_status_frame.set_align(enums::Align::Left | enums::Align::Inside);
+
+        let mut task_detail_frame = Frame::default().with_label(
+            "当前任务：暂无\n进度：等待接入后台队列\n说明：这一页会承接后续的任务列表、进度条和结果摘要。",
+        );
+        task_detail_frame.set_align(enums::Align::Left | enums::Align::Inside | enums::Align::Top);
+
+        task_page.fixed(&task_progress, 26);
+        task_page.fixed(&task_status_frame, 28);
+        task_page.fixed(&task_detail_frame, 78);
+        task_page.end();
+
+        tabs.end();
+        tabs.auto_layout();
+        wind.resizable(&tabs);
         wind.end();        
         wind.show();
         
@@ -382,6 +426,10 @@ impl Cuby {
             wind,
             file_browser,
             search_browser,
+            task_browser,
+            task_progress,
+            task_status_frame,
+            task_detail_frame,
             search_input,
             info_frame,
             receiver,
@@ -471,6 +519,10 @@ impl Cuby {
     }
 
     fn redraw_ui(&mut self) {
+        self.task_browser.redraw();
+        self.task_progress.redraw();
+        self.task_status_frame.redraw();
+        self.task_detail_frame.redraw();
         self.info_frame.redraw();
         self.wind.redraw();
     }
