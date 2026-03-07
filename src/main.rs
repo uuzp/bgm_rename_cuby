@@ -97,8 +97,10 @@ enum Message {
 
     FileBrowserPush,
     SearchBrowserPush,
+    TaskBrowserPush,
     SearchBrowserDoubleClick,
     SearchBrowserRightClick,
+    OpenTaskFolder,
     SearchCompleted {
         query: String,
         result: Result<Vec<bangumi_api::Subject>, String>,
@@ -143,6 +145,7 @@ struct Cuby {
     task_browser: HoldBrowser,
     task_progress: Progress,
     task_status_frame: Frame,
+    task_open_folder_btn: Button,
     task_detail_frame: Frame,
     search_input: Input,
     info_frame: Frame,
@@ -190,6 +193,9 @@ struct TaskRequest {
 struct TaskListEntry {
     id: u64,
     title: String,
+    base_path: String,
+    anime_path: String,
+    target_dir: String,
     status: TaskStatus,
     completed_files: usize,
     total_files: usize,
@@ -628,6 +634,16 @@ impl Cuby {
         let mut task_browser = HoldBrowser::default();
         task_browser.add("当前还没有排队任务");
         task_browser.add("后续点击开始后，这里会显示等待中/进行中/已完成的任务");
+        {
+            let sender_task = sender.clone();
+            task_browser.handle(move |_browser, event| match event {
+                Event::Push => {
+                    sender_task.send(Message::TaskBrowserPush);
+                    true
+                }
+                _ => false,
+            });
+        }
 
         let mut task_progress = Progress::default();
         task_progress.set_minimum(0.0);
@@ -635,8 +651,14 @@ impl Cuby {
         task_progress.set_value(0.0);
         task_progress.set_label("0%");
 
+        let mut task_status_row = Flex::default().row();
         let mut task_status_frame = Frame::default().with_label("状态：空闲");
         task_status_frame.set_align(enums::Align::Left | enums::Align::Inside);
+        let mut task_open_folder_btn = Button::default().with_label("📁");
+        task_open_folder_btn.emit(sender.clone(), Message::OpenTaskFolder);
+        task_open_folder_btn.set_tooltip("打开任务对应文件夹");
+        task_status_row.fixed(&task_open_folder_btn, 36);
+        task_status_row.end();
 
         let mut task_detail_frame = Frame::default().with_label(
             "当前任务：暂无\n进度：等待接入后台队列\n说明：这一页会承接后续的任务列表、进度条和结果摘要。",
@@ -644,7 +666,7 @@ impl Cuby {
         task_detail_frame.set_align(enums::Align::Left | enums::Align::Inside | enums::Align::Top);
 
         task_page.fixed(&task_progress, 26);
-        task_page.fixed(&task_status_frame, 28);
+        task_page.fixed(&task_status_row, 28);
         task_page.fixed(&task_detail_frame, 78);
         task_page.end();
 
@@ -681,6 +703,7 @@ impl Cuby {
             task_browser,
             task_progress,
             task_status_frame,
+            task_open_folder_btn,
             task_detail_frame,
             search_input,
             info_frame,
@@ -749,12 +772,20 @@ impl Cuby {
                 self.handle_browser_click(false);
                 true
             }
+            Message::TaskBrowserPush => {
+                self.handle_task_browser_push();
+                true
+            }
             Message::SearchBrowserDoubleClick => {
                 self.handle_search_results_double_click();
                 true
             }
             Message::SearchBrowserRightClick => {
                 self.handle_search_results_right_click();
+                true
+            }
+            Message::OpenTaskFolder => {
+                self.handle_open_task_folder();
                 true
             }
             Message::SearchCompleted { query, result } => {
@@ -809,7 +840,12 @@ impl Cuby {
         if self.tasks.is_empty() {
             self.task_browser.add("当前还没有排队任务");
         } else {
-            for task in &self.tasks {
+            let selected_task_id = self
+                .focused_task_id
+                .or(self.current_task_id)
+                .or_else(|| self.tasks.last().map(|task| task.id));
+
+            for (index, task) in self.tasks.iter().enumerate() {
                 let progress = if task.total_files == 0 {
                     "0/0".to_string()
                 } else {
@@ -822,6 +858,10 @@ impl Cuby {
                     task.title,
                     progress
                 ));
+
+                if selected_task_id == Some(task.id) {
+                    self.task_browser.select((index + 1) as i32);
+                }
             }
         }
 
@@ -845,20 +885,70 @@ impl Cuby {
             self.task_progress.set_label(&format!("{percent:.0}%"));
             self.task_status_frame
                 .set_label(&format!("状态：{}", task.status.label()));
+            self.task_open_folder_btn.activate();
             self.task_detail_frame.set_label(&format!(
-                "任务：{}\n进度：{}/{}\n说明：{}",
+                "任务：{}\n进度：{}/{}\n源目录：{}\n目标目录：{}\n说明：{}",
                 task.title,
                 task.completed_files,
                 task.total_files,
+                task.base_path,
+                task.target_dir,
                 task.detail
             ));
         } else {
             self.task_progress.set_value(0.0);
             self.task_progress.set_label("0%");
             self.task_status_frame.set_label("状态：空闲");
+            self.task_open_folder_btn.deactivate();
             self.task_detail_frame.set_label(
                 "当前任务：暂无\n进度：等待接入后台队列\n说明：这一页会承接后续的任务列表、进度条和结果摘要。",
             );
+        }
+    }
+
+    fn selected_task_index(&self) -> Option<usize> {
+        let line = self.task_browser.value();
+        if line <= 0 || line > self.task_browser.size() {
+            return None;
+        }
+        Some((line as usize) - 1)
+    }
+
+    fn handle_task_browser_push(&mut self) {
+        let Some(index) = self.selected_task_index() else {
+            return;
+        };
+
+        if let Some(task) = self.tasks.get(index) {
+            self.focused_task_id = Some(task.id);
+            self.set_info(&format!("已选择任务 #{}: {}", task.id, task.title));
+        }
+    }
+
+    fn handle_open_task_folder(&mut self) {
+        let Some(task) = self
+            .focused_task_id
+            .and_then(|task_id| self.tasks.iter().find(|task| task.id == task_id))
+            .or_else(|| {
+                self.current_task_id
+                    .and_then(|task_id| self.tasks.iter().find(|task| task.id == task_id))
+            })
+            .or_else(|| self.tasks.last())
+        else {
+            self.set_info("当前没有可打开的任务目录");
+            return;
+        };
+
+        let preferred_path = if std::path::Path::new(&task.target_dir).exists() {
+            task.target_dir.as_str()
+        } else if std::path::Path::new(&task.anime_path).exists() {
+            task.anime_path.as_str()
+        } else {
+            task.base_path.as_str()
+        };
+
+        if let Err(error) = open_path_in_file_manager(std::path::Path::new(preferred_path)) {
+            self.set_info(&format!("打开任务文件夹失败: {}", error));
         }
     }
 
@@ -1156,9 +1246,17 @@ impl Cuby {
 
     fn enqueue_task(&mut self, task: TaskRequest) -> Result<(), String> {
         self.focused_task_id = Some(task.id);
+        let task_target_dir = build_target_directory_path(
+            &task.anime_path,
+            task.subject.display_name(),
+            &task.episodes.year.to_string(),
+        );
         self.tasks.push(TaskListEntry {
             id: task.id,
             title: task.title.clone(),
+            base_path: task.base_path.clone(),
+            anime_path: task.anime_path.clone(),
+            target_dir: task_target_dir.to_string_lossy().to_string(),
             status: TaskStatus::Queued,
             completed_files: 0,
             total_files: task.source_files.len(),
@@ -1812,6 +1910,32 @@ fn open_url(url: &str) -> std::io::Result<()> {
     #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
     {
         let _ = url;
+        Ok(())
+    }
+}
+
+fn open_path_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer").arg(path).status()?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(path).status()?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open").arg(path).status()?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
+    {
+        let _ = path;
         Ok(())
     }
 }
